@@ -1,0 +1,88 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ApplicationStatus {
+  NEW
+  IN_PROGRESS
+  SUBMITTED
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+enum FileType {
+  HALF_BODY
+  PASSPORT
+  RECOMMENDATION
+}
+
+enum AnswerFieldType {
+  TEXT
+  SINGLE_CHOICE
+  MULTI_CHOICE
+  DATE
+  PHONE
+}
+
+model Application {
+  id              String             @id @default(uuid())
+  telegramId      BigInt             @map("telegram_id")
+  status          ApplicationStatus  @default(NEW)
+  currentStep     String?            @map("current_step")
+  
+  // Timestamps
+  createdAt       DateTime           @default(now()) @map("created_at")
+  updatedAt       DateTime           @updatedAt @map("updated_at")
+  submittedAt     DateTime?          @map("submitted_at")
+  reviewedAt      DateTime?          @map("reviewed_at")
+  reviewedBy      BigInt?            @map("reviewed_by")
+  rejectionReason String?            @map("rejection_reason")
+
+  // Relations
+  answers         ApplicationAnswer[]
+  files           ApplicationFile[]
+
+  @@index([telegramId])
+  @@index([status])
+  @@index([telegramId, status])
+  @@map("applications")
+}
+
+model ApplicationAnswer {
+  id            String           @id @default(uuid())
+  applicationId String           @map("application_id")
+  fieldKey      String           @map("field_key")
+  fieldValue    String           @map("field_value")
+  fieldType     AnswerFieldType  @default(TEXT) @map("field_type")
+  createdAt     DateTime         @default(now()) @map("created_at")
+
+  application   Application      @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@unique([applicationId, fieldKey])
+  @@index([applicationId])
+  @@index([fieldKey])
+  @@map("application_answers")
+}
+
+model ApplicationFile {
+  id              String        @id @default(uuid())
+  applicationId   String        @map("application_id")
+  type            FileType
+  telegramFileId  String        @map("telegram_file_id")
+  cloudinaryUrl   String?       @map("cloudinary_url")
+  cloudinaryPublicId String?    @map("cloudinary_public_id")
+  meta            Json?         @default("{}")
+  createdAt       DateTime      @default(now()) @map("created_at")
+
+  application     Application   @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([applicationId])
+  @@index([type])
+  @@map("application_files")
+}
