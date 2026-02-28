@@ -1,13 +1,33 @@
-import { Context } from '../bot'
 import sharp from 'sharp'
-import { PhotoRules } from '../config/constants'
-import { PhotoValidationResult } from '../types/domain'
-import { logger } from '../utils/logger'
 import axios from 'axios'
 import { v2 as cloudinary } from 'cloudinary'
-import { env } from '../config/env'
 
-// Cloudinary config
+import { env } from '../config/env'
+import { logger } from '../utils/logger'
+import { type BotContext } from '../bot/bot'
+
+export type HalfBodyPhotoRules = {
+	minWidth: number
+	minHeight: number
+	minRatio: number
+	maxRatio: number
+}
+
+export type PhotoValidationOk = {
+	ok: true
+	width: number
+	height: number
+	ratio: number
+	buffer: Buffer
+}
+
+export type PhotoValidationFail = {
+	ok: false
+	reason: string
+}
+
+export type PhotoValidationResult = PhotoValidationOk | PhotoValidationFail
+
 cloudinary.config({
 	cloud_name: env.CLOUDINARY_CLOUD_NAME,
 	api_key: env.CLOUDINARY_API_KEY,
@@ -15,99 +35,66 @@ cloudinary.config({
 })
 
 export class PhotoService {
-	async validateHalfBodyPhoto(ctx: Context): Promise<PhotoValidationResult> {
+	async validateTelegramPhoto(
+		ctx: BotContext,
+		telegramFileId: string,
+		rules: HalfBodyPhotoRules
+	): Promise<PhotoValidationResult> {
 		try {
-			const photos = ctx.message?.photo
-			if (!photos?.length) {
-				return { ok: false, reason: "Iltimos, rasmni PHOTO ko'rinishida yuboring." }
+			const file = await ctx.api.getFile(telegramFileId)
+			if (!file.file_path) {
+				return { ok: false, reason: "Rasmni olishda xatolik. Qayta yuboring." }
 			}
-
-			// Eng katta rasmni olish
-			const best = photos[photos.length - 1]
-			const file = await ctx.api.getFile(best.file_id)
 			const url = `https://api.telegram.org/file/bot${env.BOT_TOKEN}/${file.file_path}`
 
-			const response = await axios.get(url, { responseType: 'arraybuffer' })
-			const buffer = Buffer.from(response.data)
+			const res = await axios.get<ArrayBuffer>(url, { responseType: 'arraybuffer' })
+			const buffer = Buffer.from(res.data)
 
-			const metadata = await sharp(buffer).metadata()
-			const width = metadata.width || 0
-			const height = metadata.height || 0
-
-			// Minimal o'lcham tekshirish
-			if (width < PhotoRules.MIN_WIDTH || height < PhotoRules.MIN_HEIGHT) {
+			const meta = await sharp(buffer).metadata()
+			const width = meta.width ?? 0
+			const height = meta.height ?? 0
+			if (width < rules.minWidth || height < rules.minHeight) {
 				return {
 					ok: false,
-					reason: `Rasm sifati past. Kamida ${PhotoRules.MIN_WIDTH}x${PhotoRules.MIN_HEIGHT} piksel bo'lishi kerak.`
+					reason: `Rasm sifati past. Kamida ${rules.minWidth}x${rules.minHeight} bo‘lsin.`
 				}
 			}
-
-			// Portret format tekshirish
 			if (height <= width) {
-				return {
-					ok: false,
-					reason: "Rasm portret (tik) formatda bo'lishi kerak. Enidan balandligi katta bo'lsin."
-				}
+				return { ok: false, reason: "Rasm tik (portret) formatda bo‘lishi kerak." }
 			}
-
-			// Nisbat tekshirish (3x4 ga yaqin)
 			const ratio = width / height
-			if (ratio < PhotoRules.MIN_RATIO || ratio > PhotoRules.MAX_RATIO) {
-				return {
-					ok: false,
-					reason:
-						"Rasm nisbatlari mos emas. 3x4 formatga yaqin bo'lishi kerak (belidan yuqori rasm)."
-				}
+			if (ratio < rules.minRatio || ratio > rules.maxRatio) {
+				return { ok: false, reason: "Rasm nisbatlari mos emas. Belidan yuqori (tik) rasm yuboring." }
 			}
 
-			// Rasmda yuz borligini tekshirish (oddiy brightness tekshiruvi)
-			const stats = await sharp(buffer).stats()
-			const avgBrightness = stats.channels[0].mean // Red channel as brightness proxy
-
-			if (avgBrightness < 20) {
-				return {
-					ok: false,
-					reason: "Rasm juda qorong'i. Yaxshiroq yorug'likda rasm yuboring."
-				}
-			}
-
-			return {
-				ok: true,
-				width,
-				height,
-				buffer
-			}
-		} catch (error) {
-			logger.error({ error }, 'Photo validation error')
-			return {
-				ok: false,
-				reason: "Rasmni tekshirishda xatolik. Iltimos, qayta urinib ko'ring."
-			}
+			return { ok: true, width, height, ratio, buffer }
+		} catch (err) {
+			logger.error({ err }, 'Photo validation failed')
+			return { ok: false, reason: "Rasmni tekshirishda xatolik. Qayta urinib ko‘ring." }
 		}
 	}
 
-	async uploadToCloudinary(ctx: Context, fileId: string): Promise<string> {
-		try {
-			const file = await ctx.api.getFile(fileId)
-			const url = `https://api.telegram.org/file/bot${env.BOT_TOKEN}/${file.file_path}`
-
-			// Cloudinary'ga yuklash
-			const result = await cloudinary.uploader.upload(url, {
-				folder: 'reception_bot/photos',
-				transformation: [{ width: 800, height: 1000, crop: 'limit' }, { quality: 'auto' }]
-			})
-
-			logger.info({ fileId, publicId: result.public_id }, 'Photo uploaded to Cloudinary')
-			return result.secure_url
-		} catch (error) {
-			logger.error({ error, fileId }, 'Cloudinary upload failed')
-			throw error
-		}
-	}
-
-	async getPhotoUrl(fileId: string): Promise<string> {
-		// Telegram dan to'g'ridan-to'g'ri URL qaytarish
-		return `https://api.telegram.org/file/bot${env.BOT_TOKEN}/`
+	async uploadBufferToCloudinary(
+		buffer: Buffer
+	): Promise<{ secureUrl: string; publicId: string }> {
+		return new Promise((resolve, reject) => {
+			const stream = cloudinary.uploader.upload_stream(
+				{
+					folder: 'telegram-reception-bot/half_body',
+					resource_type: 'image',
+					quality: 'auto',
+					fetch_format: 'auto'
+				},
+				(error, result) => {
+					if (error || !result) {
+						reject(error ?? new Error('Cloudinary upload failed'))
+						return
+					}
+					resolve({ secureUrl: result.secure_url, publicId: result.public_id })
+				}
+			)
+			stream.end(buffer)
+		})
 	}
 }
 

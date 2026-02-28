@@ -1,5 +1,4 @@
 import { answerRepo } from '../db/repositories/answer.repo'
-import { fileRepo } from '../db/repositories/file.repo'
 
 export async function buildSummary(applicationId: string): Promise<string> {
 	const answers = await answerRepo.getByApplicationId(applicationId)

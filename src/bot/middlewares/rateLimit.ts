@@ -1,5 +1,5 @@
-import { Middleware } from 'grammy'
-import { Context } from '../bot'
+import { type Middleware } from 'grammy'
+import { type BotContext } from '../bot'
 import { RateLimit } from '../../config/constants'
 import { logger } from '../../utils/logger'
 
@@ -12,7 +12,7 @@ interface RateLimitStore {
 
 const store: RateLimitStore = {}
 
-export const rateLimitMiddleware: Middleware<Context> = async (ctx, next) => {
+export const rateLimitMiddleware: Middleware<BotContext> = async (ctx, next) => {
 	if (!ctx.from) return next()
 
 	const key = `rate:${ctx.from.id}`

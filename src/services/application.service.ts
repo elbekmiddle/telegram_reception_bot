@@ -1,4 +1,4 @@
-import { Application, ApplicationStatus, AnswerFieldType } from '@prisma/client'
+import { Application, AnswerFieldType, FileType } from '@prisma/client'
 import { applicationRepo } from '../db/repositories/application.repo'
 import { answerRepo } from '../db/repositories/answer.repo'
 import { fileRepo } from '../db/repositories/file.repo'
@@ -8,14 +8,15 @@ import { StepKey } from '../config/constants'
 export class ApplicationService {
 	async createApplication(telegramId: number): Promise<Application> {
 		try {
-			const existing = await applicationRepo.findByTelegramId(telegramId)
+			// number ni bigint ga aylantirish
+			const existing = await applicationRepo.findByTelegramId(BigInt(telegramId))
 
 			if (existing) {
 				return existing
 			}
 
 			const app = await applicationRepo.create({
-				telegramId,
+				telegramId: BigInt(telegramId),
 				status: 'IN_PROGRESS',
 				currentStep: StepKey.PERSON_FULL_NAME
 			})
@@ -51,16 +52,18 @@ export class ApplicationService {
 
 	async saveFile(
 		applicationId: string,
-		type: any,
+		type: FileType,
 		telegramFileId: string,
-		meta?: Record<string, any>
+		data?: { cloudinaryUrl?: string; cloudinaryPublicId?: string; meta?: Record<string, unknown> }
 	): Promise<void> {
 		try {
 			await fileRepo.save({
 				applicationId,
 				type,
 				telegramFileId,
-				meta
+				cloudinaryUrl: data?.cloudinaryUrl,
+				cloudinaryPublicId: data?.cloudinaryPublicId,
+				meta: data?.meta || {}
 			})
 
 			logger.info({ applicationId, type }, 'File saved')

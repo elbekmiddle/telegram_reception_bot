@@ -13,6 +13,10 @@ const envSchema = z.object({
 
 	// Redis (optional)
 	REDIS_URL: z.string().url().optional(),
+	REDIS_HOST: z.string().default('localhost'),
+	REDIS_PORT: z.string().default('6379'),
+	REDIS_PASSWORD: z.string().optional(),
+	REDIS_DB: z.string().default('0'),
 
 	// Cloudinary
 	CLOUDINARY_CLOUD_NAME: z.string().min(1),

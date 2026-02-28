@@ -2,8 +2,8 @@ export class Validators {
 	static validateName(name: string): boolean {
 		const trimmed = name.trim()
 		if (trimmed.length < 3 || trimmed.length > 100) return false
-		// Faqat harflar, bo'shliq va tire
-		return /^[A-Za-zÀ-ÖØ-öø-ÿ\s\-']+$/.test(trimmed)
+		// Harflar (latin/kiril), bo'shliq va tire
+		return /^[\p{L}\s\-']+$/u.test(trimmed)
 	}
 
 	static validateBirthDate(date: string): { isValid: boolean; parsed?: Date } {

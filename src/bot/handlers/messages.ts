@@ -1,8 +1,8 @@
-import { Bot } from 'grammy'
-import { Context } from '../bot'
+import { type Bot } from 'grammy'
+import { type BotContext } from '../bot'
 import { logger } from '../../utils/logger'
 
-export function setupMessageHandlers(bot: Bot<Context>) {
+export function setupMessageHandlers(bot: Bot<BotContext>): void {
 	// Text handler
 	bot.on('message:text', async ctx => {
 		logger.debug(

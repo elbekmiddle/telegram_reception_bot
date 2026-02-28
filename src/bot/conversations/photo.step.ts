@@ -1,108 +1,139 @@
-import { Context } from '../bot'
 import { InlineKeyboard } from 'grammy'
-import { PhotoRules, CallbackData } from '../../config/constants'
-import { photoService } from '../../services/photo.service'
-import { logger } from '../../utils/logger'
+import type { Conversation } from '@grammyjs/conversations'
+import { type BotContext } from '../bot'
+import { photoService, type HalfBodyPhotoRules } from '../../services/photo.service'
+import { keyboards } from '../../utils/keyboards'
+import { applicationService } from '../../services/application.service'
+import { FileType } from '@prisma/client'
+
+export type HalfBodyPhotoResult = {
+	telegramFileId: string
+	cloudinaryUrl: string
+	cloudinaryPublicId: string
+	meta: {
+		width: number
+		height: number
+		ratio: number
+	}
+}
 
 export class PhotoStep {
-	static async handle(ctx: Context): Promise<string> {
-		const keyboard = new InlineKeyboard()
-			.text("📸 Qoidani ko'rsat", CallbackData.PHOTO_RULES)
-			.row()
-			.text('⬅️ Orqaga', CallbackData.NAV_BACK)
-			.text('❌ Bekor qilish', CallbackData.NAV_CANCEL)
+	static async handle(
+		conversation: Conversation<BotContext>,
+		ctx: BotContext,
+		rules: HalfBodyPhotoRules,
+		applicationId: string
+	): Promise<HalfBodyPhotoResult> {
+		let lastMessageId: number | null = null
 
-		// Qoidani tushuntirish
-		await ctx.reply(
-			'📸 *Belidan yuqori rasm yuboring*\n\n' +
-				"✅ *To'g'ri misol:*\n" +
-				"• Yuz aniq ko'rinishi kerak\n" +
-				"• Fon oddiy bo'lishi kerak\n" +
-				'• Rasm tik formatda (enidan balandligi katta)\n' +
-				'• Kamida 800x1000 piksel\n\n' +
-				"❌ *Noto'g'ri misol:*\n" +
-				'• Pasport 3x4 skan qilmang\n' +
-				"• To'liq gavda rasm emas\n" +
-				'• Juda kichik yoki loyqa rasm\n\n' +
-				'Rasmni yuboring:',
-			{
-				parse_mode: 'Markdown',
-				reply_markup: keyboard
-			}
+		const kb = new InlineKeyboard()
+			.text("📋 Qoidani ko'rsat", 'PHOTO|RULES')
+			.row()
+			.text('⬅️ Orqaga', 'NAV|BACK')
+			.text('❌ Bekor qilish', 'NAV|CANCEL')
+
+		const sentMsg = await ctx.reply(
+			[
+				'📸 *Belidan yuqori rasm yuboring*',
+				'',
+				'✅ Talablar:',
+				"• Rasm *beldan yuqori qismi* bo'lishi kerak",
+				"• Yuzingiz aniq ko'rinsin",
+				'• Tik (portret) format',
+				`• Kamida ${rules.minWidth}x${rules.minHeight} piksel`,
+				"• Boshqa shaxslar bo'lmasligi kerak",
+				'',
+				'Rasmni yuboring:'
+			].join('\n'),
+			{ parse_mode: 'Markdown', reply_markup: kb }
 		)
+		lastMessageId = sentMsg.message_id
 
 		while (true) {
-			const response = await ctx.conversation.wait()
+			const u = await conversation.wait()
 
-			// Callback query bo'lsa
-			if (response.callbackQuery) {
-				await response.answerCallbackQuery()
-				const data = response.callbackQuery.data
+			if (u.callbackQuery) {
+				await u.answerCallbackQuery()
+				const data = u.callbackQuery.data
+				if (data === 'NAV|BACK') throw new Error('BACK')
+				if (data === 'NAV|CANCEL') throw new Error('CANCEL')
+				if (data === 'PHOTO|RULES') {
+					if (lastMessageId) {
+						try {
+							await ctx.api.deleteMessage(ctx.chat!.id, lastMessageId)
+						} catch (error) {}
+					}
 
-				if (data === CallbackData.NAV_BACK) {
-					throw new Error('BACK')
-				}
-				if (data === CallbackData.NAV_CANCEL) {
-					throw new Error('CANCEL')
-				}
-				if (data === CallbackData.PHOTO_RULES) {
-					await this.showRules(ctx)
+					const rulesMsg = await ctx.reply(
+						[
+							"📋 *To'g'ri / noto'g'ri misol:*",
+							"✅ To'g'ri: yuz yaqin, yelka/bel ko'rinadi, fon oddiy.",
+							"❌ Noto'g'ri: pasport 3x4, juda uzoqdan, juda kichik/loyqa, bir necha odam.",
+							'',
+							'Endi rasm yuboring:'
+						].join('\n'),
+						{ parse_mode: 'Markdown' }
+					)
+					lastMessageId = rulesMsg.message_id
 					continue
 				}
 			}
 
-			// Rasm tekshirish
-			if (response.message?.photo) {
-				const validation = await photoService.validateHalfBodyPhoto(response)
-
-				if (!validation.ok) {
-					const retryKeyboard = new InlineKeyboard()
-						.text('🔄 Qayta yuborish', CallbackData.PHOTO_RETRY)
-						.text("📸 Qoidani ko'rsat", CallbackData.PHOTO_RULES)
-
-					await ctx.reply(validation.reason || "Rasm mos kelmadi. Qayta urinib ko'ring.", {
-						reply_markup: retryKeyboard
-					})
-					continue
+			if (!u.message?.photo?.length) {
+				if (lastMessageId) {
+					try {
+						await ctx.api.deleteMessage(ctx.chat!.id, lastMessageId)
+					} catch (error) {}
 				}
 
-				// Rasmni saqlash
-				try {
-					const fileId = response.message.photo[response.message.photo.length - 1].file_id
-
-					// Cloudinary'ga yuklash
-					const photoUrl = await photoService.uploadToCloudinary(ctx, fileId)
-
-					// File ID ni qaytarish
-					return fileId
-				} catch (error) {
-					logger.error({ error }, 'Photo upload failed')
-					await ctx.reply("Rasmni saqlashda xatolik. Iltimos, qayta urinib ko'ring.")
-					continue
-				}
+				const errorMsg = await ctx.reply('Iltimos, rasmni PHOTO ko‘rinishida yuboring.', {
+					reply_markup: keyboards.photoRetryOrRules()
+				})
+				lastMessageId = errorMsg.message_id
+				continue
 			}
 
-			await ctx.reply('Iltimos, rasm yuboring yoki tugmalardan birini tanlang.')
+			const best = u.message.photo[u.message.photo.length - 1]
+			const validated = await photoService.validateTelegramPhoto(ctx, best.file_id, rules)
+
+			if (!validated.ok) {
+				if (lastMessageId) {
+					try {
+						await ctx.api.deleteMessage(ctx.chat!.id, lastMessageId)
+					} catch (error) {}
+				}
+
+				const errorMsg = await ctx.reply(validated.reason, {
+					reply_markup: keyboards.photoRetryOrRules()
+				})
+				lastMessageId = errorMsg.message_id
+				continue
+			}
+
+			// Rasmni Cloudinary ga yuklash
+			const uploaded = await photoService.uploadBufferToCloudinary(validated.buffer)
+
+			// Rasm ma'lumotlarini DB ga saqlash
+			await applicationService.saveFile(applicationId, FileType.HALF_BODY, best.file_id, {
+				cloudinaryUrl: uploaded.secureUrl,
+				cloudinaryPublicId: uploaded.publicId,
+				meta: {
+					width: validated.width,
+					height: validated.height,
+					ratio: validated.ratio
+				}
+			})
+
+			return {
+				telegramFileId: best.file_id,
+				cloudinaryUrl: uploaded.secureUrl,
+				cloudinaryPublicId: uploaded.publicId,
+				meta: {
+					width: validated.width,
+					height: validated.height,
+					ratio: validated.ratio
+				}
+			}
 		}
-	}
-
-	private static async showRules(ctx: Context) {
-		// To'g'ri va noto'g'ri misollarni ko'rsatish
-		await ctx.reply(
-			'📸 *QOIDA: Belidan yuqori rasm*\n\n' +
-				"🔹 *TO'G'RI:*\n" +
-				'• Yuz va yelka qismi aniq\n' +
-				'• Fon oddiy (devor yoki bir xil rang)\n' +
-				"• Rasm aniq va yorug'\n" +
-				'• Portret formatda\n\n' +
-				"🔸 *NOTO'G'RI:*\n" +
-				'• Pasport 3x4 skan\n' +
-				"• To'liq gavda (oyoqdan boshgacha)\n" +
-				'• Juda kichkina rasm\n' +
-				'• Guruhda tushgan rasm\n' +
-				'• Filtr qilingan yoki yuzi berkitilgan\n\n' +
-				"Endi to'g'ri rasm yuboring:",
-			{ parse_mode: 'Markdown' }
-		)
 	}
 }

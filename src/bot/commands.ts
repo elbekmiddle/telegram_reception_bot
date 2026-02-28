@@ -1,74 +1,64 @@
-import { Bot } from 'grammy'
-import { Context } from './bot'
-import { logger } from '../utils/logger'
-import { applicationRepo } from '../db/repositories/answer.repo'
-import { StepKey } from '../config/constants'
+import { type Bot } from 'grammy'
 
-export function setupCommands(bot: Bot<Context>) {
-	// Start command
+import { type BotContext } from './bot'
+import { logger } from '../utils/logger'
+import { StepKey } from '../config/constants'
+import { applicationService } from '../services/application.service'
+import { keyboards } from '../utils/keyboards'
+
+export function setupCommands(bot: Bot<BotContext>): void {
 	bot.command('start', async ctx => {
 		try {
-			const telegramId = ctx.from.id
-			const existingApp = ctx.state.application
+			const telegramId = ctx.from?.id
+			if (!telegramId) return
 
-			if (existingApp) {
-				const keyboard = {
-					reply_markup: {
-						inline_keyboard: [
-							[
-								{ text: '✅ Davom ettirish', callback_data: 'NAV|RESUME' },
-								{ text: '🔄 Yangidan boshlash', callback_data: 'NAV|RESTART' }
-							]
-						]
-					}
-				}
-
+			// If there is an in-progress app in DB (loaded in auth middleware), ask resume/restart.
+			if (ctx.state.applicationId && ctx.state.inProgress) {
 				await ctx.reply(
-					'Sizda boshlangan anketa mavjud. Davom ettirasizmi yoki yangidan boshlaysizmi?',
-					keyboard
+					"Sizda boshlangan anketa bor. Davom ettirasizmi yoki yangidan boshlaysizmi?",
+					{ reply_markup: keyboards.resumeOrRestart() }
 				)
-			} else {
-				await ctx.conversation.enter('applicationFlow')
+				return
 			}
-		} catch (error) {
-			logger.error({ error, telegramId: ctx.from.id }, 'Start command error')
-			await ctx.reply("Xatolik yuz berdi. Iltimos, qaytadan urinib ko'ring.")
+
+			// Otherwise create fresh and start flow
+			const app = await applicationService.createApplication(telegramId)
+			ctx.session.applicationId = app.id
+			ctx.session.currentStep = StepKey.PERSON_FULL_NAME
+			ctx.session.history = []
+			ctx.session.temp = {}
+
+			await ctx.conversation.enter('applicationFlow')
+		} catch (err) {
+			logger.error({ err, telegramId: ctx.from?.id }, 'Start command failed')
+			await ctx.reply("Xatolik yuz berdi. /start bilan qayta urinib ko'ring.")
 		}
 	})
 
-	// Cancel command
 	bot.command('cancel', async ctx => {
 		try {
 			if (ctx.session.applicationId) {
-				await applicationRepo.updateStatus(ctx.session.applicationId, 'CANCELLED')
+				await applicationService.cancelApplication(ctx.session.applicationId)
 			}
-
-			ctx.session = {
-				currentStep: StepKey.PERSON_FULL_NAME,
-				history: [],
-				temp: {},
-				createdAt: Date.now(),
-				lastActivity: Date.now()
-			}
-
-			await ctx.reply("Anketa bekor qilindi. Yangidan boshlash uchun /start buyrug'ini bosing.")
-		} catch (error) {
-			logger.error({ error, telegramId: ctx.from.id }, 'Cancel command error')
+			ctx.session.applicationId = undefined
+			ctx.session.currentStep = StepKey.PERSON_FULL_NAME
+			ctx.session.history = []
+			ctx.session.temp = {}
+			await ctx.reply("Anketa bekor qilindi. /start bilan yangidan boshlang.")
+		} catch (err) {
+			logger.error({ err, telegramId: ctx.from?.id }, 'Cancel command failed')
 			await ctx.reply('Xatolik yuz berdi.')
 		}
 	})
 
-	// Help command
 	bot.command('help', async ctx => {
-		const helpText = `
-🆘 Yordam:
-
-/start - Anketani boshlash
-/cancel - Anketani bekor qilish
-/help - Yordam olish
-
-Agar muammo yuzaga kelsa, administrator bilan bog'laning.
-    `
-		await ctx.reply(helpText)
+		await ctx.reply(
+			[
+				'🆘 Yordam:',
+				'/start — anketa boshlash',
+				'/cancel — anketani bekor qilish',
+				'/help — yordam'
+			].join('\n')
+		)
 	})
 }

@@ -13,6 +13,7 @@ export interface SessionData {
 		waitingFor?: string
 		multiSelect?: Record<string, boolean>
 		customInput?: string
+		
 	}
 
 	// Metadata

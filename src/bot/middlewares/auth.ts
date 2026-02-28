@@ -1,18 +1,19 @@
-import { Middleware } from 'grammy'
-import { Context } from '../bot'
+import { type Middleware } from 'grammy'
+import { type BotContext } from '../bot'
 import { applicationRepo } from '../../db/repositories/application.repo'
-import { logger } from '../../utils/logger'
+import { logger, normalizeError } from '../../utils/logger'
 import { StepKey } from '../../config/constants'
 
-export const authMiddleware: Middleware<Context> = async (ctx, next) => {
+export const authMiddleware: Middleware<BotContext> = async (ctx, next) => {
 	if (!ctx.from) {
 		logger.warn('No from field in context')
 		return
 	}
 
+	const telegramIdDb = BigInt(ctx.from.id)
+
 	try {
-		// Check if user has existing application
-		const existingApp = await applicationRepo.findByTelegramId(ctx.from.id)
+		const existingApp = await applicationRepo.findByTelegramId(telegramIdDb)
 
 		if (existingApp && existingApp.status === 'IN_PROGRESS') {
 			ctx.session.applicationId = existingApp.id
@@ -24,15 +25,9 @@ export const authMiddleware: Middleware<Context> = async (ctx, next) => {
 			)
 		}
 
-		ctx.state = {
-			...ctx.state,
-			telegramId: ctx.from.id,
-			application: existingApp
-		}
-
 		await next()
-	} catch (error) {
-		logger.error({ error, telegramId: ctx.from.id }, 'Auth middleware error')
+	} catch (err: unknown) {
+		logger.error({ telegramId: ctx.from.id, ...normalizeError(err) }, 'Auth middleware error')
 		await ctx.reply("Xatolik yuz berdi. Iltimos, qaytadan urinib ko'ring.")
 	}
 }

@@ -19,3 +19,10 @@ export const logger = pino(
 	},
 	transport
 )
+
+export function normalizeError(err: unknown): Record<string, unknown> {
+	if (err instanceof Error) {
+		return { name: err.name, message: err.message, stack: err.stack }
+	}
+	return { value: err }
+}

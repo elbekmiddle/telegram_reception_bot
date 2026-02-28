@@ -1,5 +1,4 @@
 import { ApplicationStatus, FileType, AnswerFieldType } from '@prisma/client'
-import { EducationType, Certificate, ComputerSkill } from '../config/constants'
 
 export interface CreateApplicationDTO {
 	telegramId: number
@@ -18,15 +17,9 @@ export interface SaveFileDTO {
 	applicationId: string
 	type: FileType
 	telegramFileId: string
-	meta?: Record<string, any>
-}
-
-export interface PhotoValidationResult {
-	ok: boolean
-	reason?: string
-	width?: number
-	height?: number
-	buffer?: Buffer
+	cloudinaryUrl?: string
+	cloudinaryPublicId?: string
+	meta?: Record<string, unknown>
 }
 
 export interface AdminSummary {

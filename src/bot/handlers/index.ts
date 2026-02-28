@@ -1,10 +1,10 @@
-import { Bot } from 'grammy'
-import { Context } from '../bot'
+import { type Bot } from 'grammy'
+import { type BotContext } from '../bot'
 import { setupMessageHandlers } from './messages'
 import { setupCallbackHandlers } from './callbacks'
 import { setupAdminHandlers } from './admin'
 
-export function setupHandlers(bot: Bot<Context>) {
+export function setupHandlers(bot: Bot<BotContext>): void {
 	setupMessageHandlers(bot)
 	setupCallbackHandlers(bot)
 	setupAdminHandlers(bot)

@@ -1,4 +1,4 @@
-import { session as grammySession } from 'grammy'
+import { session } from 'grammy'
 import { SessionData } from '../../types/session'
 import { StepKey } from '../../config/constants'
 
@@ -10,7 +10,7 @@ const initialSessionData = (): SessionData => ({
 	lastActivity: Date.now()
 })
 
-export const session = grammySession({
+export const sessionMiddleware = session<SessionData>({
 	initial: initialSessionData,
 	getSessionKey: ctx => {
 		return ctx.from?.id.toString()

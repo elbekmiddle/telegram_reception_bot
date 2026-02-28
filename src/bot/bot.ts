@@ -1,62 +1,77 @@
-import { Bot as GrammyBot, Context as GrammyContext } from 'grammy'
-import { conversations, createConversation } from '@grammyjs/conversations'
+import { Bot, Context as GrammyContext, type MiddlewareFn } from 'grammy'
+import { conversations, createConversation, type ConversationFlavor } from '@grammyjs/conversations'
+import { type SessionFlavor } from 'grammy'
+
 import { env } from '../config/env'
 import { logger } from '../utils/logger'
-import { session } from './middlewares/session'
+import { sessionMiddleware } from './middlewares/session'
 import { authMiddleware } from './middlewares/auth'
 import { rateLimitMiddleware } from './middlewares/rateLimit'
 import { setupCommands } from './commands'
 import { setupHandlers } from './handlers'
 import { applicationFlow } from './conversations/application.flow'
-import { SessionData } from '../types/session'
-import { Application } from '@prisma/client'
+import type { SessionData } from '../types/session'
 
-export type Context = GrammyContext & {
-	session: SessionData
-	conversations: {
-		enter: (name: string) => Promise<void>
-		exit: () => Promise<void>
-	}
-	state: {
-		telegramId?: number
-		application?: Application | null
-	}
+type BotState = {
+	telegramId?: number
+	applicationId?: string
+	inProgress?: boolean
 }
 
-export const bot = new GrammyBot<Context>(env.BOT_TOKEN)
+export type BotContext = GrammyContext &
+	SessionFlavor<SessionData> &
+	ConversationFlavor & {
+		state: Partial<BotState>
+	}
 
-// Setup middleware
-bot.use(session)
-bot.use(rateLimitMiddleware)
-bot.use(authMiddleware)
+/**
+ * grammY Context'da default `state` yo'q.
+ * Shu middleware har update'da `ctx.state`ni init qiladi.
+ */
+const stateMiddleware: MiddlewareFn<BotContext> = async (ctx, next) => {
+	// grammY'da ctx.state yo'q, runtime'da o'zimiz init qilamiz
+	;(ctx as unknown as { state?: Partial<BotState> }).state ??= {}
+	await next()
+}
+
+export const bot = new Bot<BotContext>(env.BOT_TOKEN)
+
+/**
+ * MUHIM ORDER:
+ * - session -> conversations -> (rateLimit/auth) -> commands/handlers
+ * - Callback query'lar conversation.wait() ga yetib borishi uchun
+ *   setupHandlers/Commands ichidagi global callback handlerlar next() qilishi kerak.
+ */
+bot.use(stateMiddleware)
+bot.use(sessionMiddleware)
+
+// Conversations plugin + flow
 bot.use(conversations())
 bot.use(createConversation(applicationFlow, 'applicationFlow'))
 
-// Setup commands and handlers
+// Rate limit/auth: callbacklarni "yeb qo'ymasligi" kerak.
+// Agar rateLimit callbackni bloklasa, rateLimitMiddleware ichida:
+//   if (ctx.callbackQuery) return next()
+// kabi qoida bo'lishi shart.
+bot.use(rateLimitMiddleware)
+bot.use(authMiddleware)
+
+// Commands/handlers ENG OXIRIDA
 setupCommands(bot)
 setupHandlers(bot)
 
-// Error handler
-bot.catch(error => {
-	logger.error({ error }, 'Bot error')
+bot.catch(err => {
+	logger.error({ err }, 'Unhandled bot error')
 })
 
-// Start bot
 export async function startBot(): Promise<void> {
-	try {
-		if (env.NODE_ENV === 'development') {
-			await bot.start({
-				onStart: info => {
-					logger.info(`✅ Bot started in polling mode: @${info.username}`)
-				}
-			})
-		} else {
-			const webhookUrl = `https://your-domain.com/webhook`
-			await bot.api.setWebhook(webhookUrl)
-			logger.info(`✅ Bot started in webhook mode: ${webhookUrl}`)
+	await bot.start({
+		onStart: info => {
+			logger.info(
+				env.NODE_ENV === 'development'
+					? `✅ Bot started (polling): @${info.username}`
+					: `✅ Bot started (polling/prod): @${info.username}`
+			)
 		}
-	} catch (error) {
-		logger.error({ error }, 'Failed to start bot')
-		process.exit(1)
-	}
+	})
 }

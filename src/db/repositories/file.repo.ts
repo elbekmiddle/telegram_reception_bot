@@ -1,17 +1,30 @@
-import { ApplicationFile } from '@prisma/client'
+import { ApplicationFile, FileType, Prisma } from '@prisma/client'
 import { prisma } from '../prisma'
-import { SaveFileDTO } from '../../types/domain'
 import { logger } from '../../utils/logger'
+
+export type SaveFileDTO = {
+	applicationId: string
+	type: FileType
+	telegramFileId: string
+	cloudinaryUrl?: string | null
+	cloudinaryPublicId?: string | null
+	meta?: Record<string, unknown>
+}
 
 export class FileRepository {
 	async save(data: SaveFileDTO): Promise<ApplicationFile> {
 		try {
+			// meta ni Prisma.InputJsonValue ga aylantirish
+			const metaValue = data.meta ? (data.meta as Prisma.InputJsonValue) : Prisma.JsonNull
+
 			return await prisma.applicationFile.create({
 				data: {
 					applicationId: data.applicationId,
 					type: data.type,
 					telegramFileId: data.telegramFileId,
-					meta: data.meta || {}
+					cloudinaryUrl: data.cloudinaryUrl,
+					cloudinaryPublicId: data.cloudinaryPublicId,
+					meta: metaValue
 				}
 			})
 		} catch (error) {
@@ -32,16 +45,27 @@ export class FileRepository {
 		}
 	}
 
-	async getByType(applicationId: string, type: string): Promise<ApplicationFile | null> {
+	async getByType(applicationId: string, type: FileType): Promise<ApplicationFile | null> {
 		try {
 			return await prisma.applicationFile.findFirst({
 				where: {
 					applicationId,
-					type: type as any
+					type
 				}
 			})
 		} catch (error) {
 			logger.error({ error, applicationId, type }, 'Error getting file by type')
+			throw error
+		}
+	}
+
+	async deleteByApplicationId(applicationId: string): Promise<void> {
+		try {
+			await prisma.applicationFile.deleteMany({
+				where: { applicationId }
+			})
+		} catch (error) {
+			logger.error({ error, applicationId }, 'Error deleting files')
 			throw error
 		}
 	}
