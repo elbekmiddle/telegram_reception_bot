@@ -68,6 +68,7 @@ export async function buildSummary(applicationId: string): Promise<string> {
 	return `
 👤 *Ism:* ${answerMap.get('full_name') || '—'}
 📅 *Tug\'ilgan sana:* ${answerMap.get('birth_date') || '—'}${(() => { const d = answerMap.get('birth_date'); const a = d ? calculateAgeFromBirthDate(d) : null; return a !== null ? ` (${a} yosh)` : '' })()}
+📅 *Tug\'ilgan sana:* ${answerMap.get('birth_date') || '—'}${answerMap.get('birth_age') ? ` (${answerMap.get('birth_age')} yosh)` : ''}
 📍 *Manzil:* ${answerMap.get('address') || '—'}
 📞 *Telefon:* ${answerMap.get('phone') || '—'}
 
@@ -104,6 +105,7 @@ export async function buildAdminSummary(applicationId: string): Promise<string> 
 	return `
 👤 *Ism:* ${answerMap.get('full_name') || '—'}
 📅 *Tug\'ilgan sana:* ${answerMap.get('birth_date') || '—'}${(() => { const d = answerMap.get('birth_date'); const a = d ? calculateAgeFromBirthDate(d) : null; return a !== null ? ` (${a} yosh)` : '' })()}
+📅 *Tug\'ilgan sana:* ${answerMap.get('birth_date') || '—'}${answerMap.get('birth_age') ? ` (${answerMap.get('birth_age')} yosh)` : ''}
 📞 *Telefon:* ${answerMap.get('phone') || '—'}
 📍 *Manzil:* ${answerMap.get('address') || '—'}
 

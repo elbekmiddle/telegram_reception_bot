@@ -288,6 +288,22 @@ function nextStep(step: StepKey): StepKey {
 	return i >= 0 ? order[Math.min(i + 1, order.length - 1)] : StepKey.SUBMITTED
 }
 
+function calculateAgeFromBirthDate(date: string): number | null {
+	const m = date.match(/^(\d{2})\.(\d{2})\.(\d{4})$/)
+	if (!m) return null
+
+	const day = Number(m[1])
+	const month = Number(m[2])
+	const year = Number(m[3])
+	const now = new Date()
+
+	let age = now.getFullYear() - year
+	const monthDiff = now.getMonth() - (month - 1)
+	if (monthDiff < 0 || (monthDiff === 0 && now.getDate() < day)) age -= 1
+
+	return age >= 0 ? age : null
+}
+
 export async function applicationFlow(conversation: Conversation<BotContext>, ctx: BotContext): Promise<void> {
 	const telegramId = ctx.from?.id
 	if (!telegramId) return
@@ -405,6 +421,16 @@ export async function applicationFlow(conversation: Conversation<BotContext>, ct
 						// DATE enum eski bazada yo'q bo'lsa flow to'xtab qolmasligi uchun TEXT saqlaymiz.
 						AnswerFieldType.TEXT
 					)
+
+					const age = calculateAgeFromBirthDate(clean)
+					if (age !== null) {
+						await applicationService.saveAnswer(
+							applicationId,
+							'birth_age',
+							String(age),
+							AnswerFieldType.TEXT
+						)
+					}
 					ctx.session.history.push(step)
 					step = nextStep(step)
 					ctx.session.currentStep = step
