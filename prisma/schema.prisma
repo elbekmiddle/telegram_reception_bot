@@ -35,6 +35,9 @@ model Application {
   telegramId      BigInt             @map("telegram_id")
   status          ApplicationStatus  @default(NEW)
   currentStep     String?            @map("current_step")
+
+  // Vacancy link (user applies to a specific vacancy)
+  vacancyId       String?            @map("vacancy_id")
   
   // Timestamps
   createdAt       DateTime           @default(now()) @map("created_at")
@@ -48,10 +51,53 @@ model Application {
   answers         ApplicationAnswer[]
   files           ApplicationFile[]
 
+  vacancy         Vacancy?           @relation(fields: [vacancyId], references: [id])
+
   @@index([telegramId])
   @@index([status])
   @@index([telegramId, status])
   @@map("applications")
+}
+
+model Vacancy {
+  id           String        @id @default(uuid())
+  title        String
+  description  String?
+  salaryFrom   Int?          @map("salary_from")  // Add this field
+  salaryTo     Int?          @map("salary_to")    // Add this field
+  isActive     Boolean       @default(true) @map("is_active")
+  createdAt    DateTime      @default(now()) @map("created_at")
+  updatedAt    DateTime      @updatedAt @map("updated_at")
+
+  applications Application[]
+
+  @@index([isActive])
+  @@map("vacancies")
+}
+
+enum CourseLevel {
+  A1
+  A2
+  B1
+  B2
+  C1
+  C2
+  IELTS
+  TOEFL
+  OTHER
+}
+
+model Course {
+  id          String      @id @default(uuid())
+  title       String
+  level       CourseLevel
+  description String?
+  isActive    Boolean     @default(true) @map("is_active")
+  createdAt   DateTime    @default(now()) @map("created_at")
+  updatedAt   DateTime    @updatedAt @map("updated_at")
+
+  @@index([isActive])
+  @@map("courses")
 }
 
 model ApplicationAnswer {

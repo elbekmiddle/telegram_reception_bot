@@ -5,6 +5,8 @@ import { photoService, type HalfBodyPhotoRules } from '../../services/photo.serv
 import { keyboards } from '../../utils/keyboards'
 import { applicationService } from '../../services/application.service'
 import { FileType } from '@prisma/client'
+import { answerRepo } from '../../db/repositories/answer.repo'
+import { AnswerFieldType } from '@prisma/client'
 
 export type HalfBodyPhotoResult = {
 	telegramFileId: string
@@ -111,7 +113,29 @@ export class PhotoStep {
 			}
 
 			// Rasmni Cloudinary ga yuklash
+			// Qo'shimcha: avvalgi yuborilgan rasm bilan o'xshashligini tekshirish (oddiy aHash)
+			const newHash = await photoService.computeImageHash(validated.buffer)
+			const oldHash = await answerRepo.getByKey(applicationId, 'photo_hash')
+			if (oldHash?.fieldValue) {
+				const dist = photoService.hammingDistance(oldHash.fieldValue, newHash)
+				// juda katta farq bo'lsa - boshqa rasm deb hisoblaymiz
+				if (dist > 10) {
+					if (lastMessageId) {
+						try {
+							await ctx.api.deleteMessage(ctx.chat!.id, lastMessageId)
+						} catch (error) {}
+					}
+					const warn = await ctx.reply(
+						"❗ Yuborgan rasmingiz avvalgi rasmingizga mos kelmadi. Iltimos, o'zingizning beldan yuqori rasmingizni yuboring.",
+						{ reply_markup: keyboards.photoRetryOrRules() }
+					)
+					lastMessageId = warn.message_id
+					continue
+				}
+			}
+
 			const uploaded = await photoService.uploadBufferToCloudinary(validated.buffer)
+			await applicationService.saveAnswer(applicationId, 'photo_hash', newHash, AnswerFieldType.TEXT)
 
 			// Rasm ma'lumotlarini DB ga saqlash
 			await applicationService.saveFile(applicationId, FileType.HALF_BODY, best.file_id, {

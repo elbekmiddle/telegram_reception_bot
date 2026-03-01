@@ -1,4 +1,4 @@
-import { ApplicationFile, FileType, Prisma } from '@prisma/client'
+import { ApplicationFile, FileType } from '@prisma/client'
 import { prisma } from '../prisma'
 import { logger } from '../../utils/logger'
 
@@ -14,9 +14,6 @@ export type SaveFileDTO = {
 export class FileRepository {
 	async save(data: SaveFileDTO): Promise<ApplicationFile> {
 		try {
-			// meta ni Prisma.InputJsonValue ga aylantirish
-			const metaValue = data.meta ? (data.meta as Prisma.InputJsonValue) : Prisma.JsonNull
-
 			return await prisma.applicationFile.create({
 				data: {
 					applicationId: data.applicationId,
@@ -24,7 +21,7 @@ export class FileRepository {
 					telegramFileId: data.telegramFileId,
 					cloudinaryUrl: data.cloudinaryUrl,
 					cloudinaryPublicId: data.cloudinaryPublicId,
-					meta: metaValue
+					meta: data.meta ?? {}
 				}
 			})
 		} catch (error) {

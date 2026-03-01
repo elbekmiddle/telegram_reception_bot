@@ -37,8 +37,6 @@ export class TelegramHelper {
 	}
 
 	static isAdmin(chatId: number): boolean {
-		const adminChatId = env.ADMIN_CHAT_ID
-		// BigInt ni number bilan solishtirish
-		return adminChatId === BigInt(chatId)
+		return env.ADMIN_CHAT_ID === chatId
 	}
 }

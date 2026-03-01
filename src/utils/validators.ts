@@ -6,23 +6,58 @@ export class Validators {
 		return /^[\p{L}\s\-']+$/u.test(trimmed)
 	}
 
-	static validateBirthDate(date: string): { isValid: boolean; parsed?: Date } {
-		const regex = /^(\d{2})\.(\d{2})\.(\d{4})$/
-		const match = date.match(regex)
+	// static validateBirthDate(date: string): { isValid: boolean; parsed?: Date } {
+	// 	const regex = /^(\d{2})\.(\d{2})\.(\d{4})$/
+	// 	const match = date.match(regex)
 
+	// 	if (!match) return { isValid: false }
+
+	// 	const [, day, month, year] = match
+	// 	const parsedDate = new Date(parseInt(year), parseInt(month) - 1, parseInt(day))
+
+	// 	const isValid =
+	// 		parsedDate.getDate() === parseInt(day) &&
+	// 		parsedDate.getMonth() === parseInt(month) - 1 &&
+	// 		parsedDate.getFullYear() === parseInt(year) &&
+	// 		parsedDate < new Date() && // Tug'ilgan sana kelajakda bo'lmasin
+	// 		parsedDate > new Date(1900, 0, 1) // 1900 dan oldin bo'lmasin
+
+	// 	return { isValid, parsed: isValid ? parsedDate : undefined }
+	// }
+
+	static validateBirthDate(input: string): { isValid: boolean; date?: Date } {
+		if (!input) return { isValid: false }
+
+		const match = input.match(/^(\d{2})\.(\d{2})\.(\d{4})$/)
 		if (!match) return { isValid: false }
 
-		const [, day, month, year] = match
-		const parsedDate = new Date(parseInt(year), parseInt(month) - 1, parseInt(day))
+		const day = Number(match[1])
+		const month = Number(match[2])
+		const year = Number(match[3])
 
-		const isValid =
-			parsedDate.getDate() === parseInt(day) &&
-			parsedDate.getMonth() === parseInt(month) - 1 &&
-			parsedDate.getFullYear() === parseInt(year) &&
-			parsedDate < new Date() && // Tug'ilgan sana kelajakda bo'lmasin
-			parsedDate > new Date(1900, 0, 1) // 1900 dan oldin bo'lmasin
+		// Basic range check
+		if (year < 1950 || year > new Date().getFullYear()) {
+			return { isValid: false }
+		}
 
-		return { isValid, parsed: isValid ? parsedDate : undefined }
+		if (month < 1 || month > 12) {
+			return { isValid: false }
+		}
+
+		const date = new Date(year, month - 1, day)
+
+		// Real date check (masalan 31.02.2000 ni ushlaydi)
+		if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) {
+			return { isValid: false }
+		}
+
+		// 16 yoshdan kichik bo‘lmasin
+		const age = new Date().getFullYear() - year
+		if (age < 16) {
+			return { isValid: false }
+		}
+
+		return { isValid: true, date }
 	}
 
 	static validatePhone(phone: string): boolean {
@@ -44,5 +79,12 @@ export class Validators {
 
 	static sanitizeText(text: string): string {
 		return text.trim().replace(/\s+/g, ' ')
+	}
+	static normalizeBirthDate(input: string): string {
+		return String(input)
+			.trim()
+			.replace(/\s+/g, '')
+			.replace(/[\/\-]/g, '.')
+			.replace(/[^0-9.]/g, '')
 	}
 }

@@ -6,10 +6,18 @@ import { StepKey } from '../../config/constants'
 import { logger } from '../../utils/logger'
 
 export function setupCallbackHandlers(bot: Bot<BotContext>): void {
-	bot.callbackQuery(/^NAV\|/, async ctx => {
+	bot.callbackQuery(/^NAV\|/, async (ctx, next) => {
 		try {
-			await ctx.answerCallbackQuery()
 			const data = ctx.callbackQuery.data
+			if (!data) return next()
+
+			// Only handle RESUME/RESTART here.
+			// BACK/CANCEL/SKIP must go to conversation.wait().
+			if (data === 'NAV|BACK' || data === 'NAV|CANCEL' || data === 'NAV|SKIP') {
+				return next()
+			}
+
+			await ctx.answerCallbackQuery()
 
 			if (data === 'NAV|RESUME') {
 				await ctx.conversation.enter('applicationFlow')
@@ -27,6 +35,8 @@ export function setupCallbackHandlers(bot: Bot<BotContext>): void {
 				await ctx.conversation.enter('applicationFlow')
 				return
 			}
+
+			return next()
 		} catch (err) {
 			logger.error({ err, userId: ctx.from?.id }, 'NAV callback failed')
 		}

@@ -1,4 +1,4 @@
-import { Application, ApplicationStatus, Prisma } from '@prisma/client'
+import { Application, ApplicationStatus } from '@prisma/client'
 import { prisma } from '../prisma'
 import { logger } from '../../utils/logger'
 
@@ -6,6 +6,7 @@ export type CreateApplicationDTO = {
 	telegramId: bigint
 	status: ApplicationStatus
 	currentStep: string
+	vacancyId?: string | null
 }
 
 export class ApplicationRepository {
@@ -15,7 +16,8 @@ export class ApplicationRepository {
 				data: {
 					telegramId: data.telegramId,
 					status: data.status,
-					currentStep: data.currentStep
+					currentStep: data.currentStep,
+					vacancyId: data.vacancyId ?? null
 				}
 			})
 		} catch (error) {
@@ -73,6 +75,74 @@ export class ApplicationRepository {
 			})
 		} catch (error) {
 			logger.error({ error, id, step }, 'Error updating application step')
+			throw error
+		}
+	}
+
+	async updateVacancy(id: string, vacancyId: string | null): Promise<Application> {
+		try {
+			return await prisma.application.update({
+				where: { id },
+				data: {
+					vacancyId,
+					updatedAt: new Date()
+				}
+			})
+		} catch (error) {
+			logger.error({ error, id, vacancyId }, 'Error updating application vacancy')
+			throw error
+		}
+	}
+
+	// ===== Admin actions / helpers =====
+	async getById(id: string): Promise<Application | null> {
+		return this.findById(id)
+	}
+
+	async getWithAnswers(id: string): Promise<(Application & { answers: unknown[] }) | null> {
+		try {
+			return (await prisma.application.findUnique({
+				where: { id },
+				include: {
+					answers: true
+				}
+			})) as unknown as (Application & { answers: unknown[] }) | null
+		} catch (error) {
+			logger.error({ error, id }, 'Error getting application with answers')
+			throw error
+		}
+	}
+
+	async approve(id: string, reviewedBy?: number): Promise<Application> {
+		try {
+			return await prisma.application.update({
+				where: { id },
+				data: {
+					status: 'APPROVED',
+					reviewedAt: new Date(),
+					reviewedBy: reviewedBy != null ? BigInt(reviewedBy) : null,
+					rejectionReason: null
+				}
+			})
+		} catch (error) {
+			logger.error({ error, id, reviewedBy }, 'Error approving application')
+			throw error
+		}
+	}
+
+	async reject(id: string, reason: string, reviewedBy?: number): Promise<Application> {
+		try {
+			return await prisma.application.update({
+				where: { id },
+				data: {
+					status: 'REJECTED',
+					reviewedAt: new Date(),
+					reviewedBy: reviewedBy != null ? BigInt(reviewedBy) : null,
+					rejectionReason: reason
+				}
+			})
+		} catch (error) {
+			logger.error({ error, id, reviewedBy }, 'Error rejecting application')
 			throw error
 		}
 	}

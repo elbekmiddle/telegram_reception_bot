@@ -4,7 +4,8 @@ import { logger } from '../../utils/logger'
 
 export function setupMessageHandlers(bot: Bot<BotContext>): void {
 	// Text handler
-	bot.on('message:text', async ctx => {
+	bot.on('message:text', async (ctx, next) => {
+		await next()
 		logger.debug(
 			{
 				text: ctx.message.text,
@@ -15,7 +16,8 @@ export function setupMessageHandlers(bot: Bot<BotContext>): void {
 	})
 
 	// Photo handler
-	bot.on('message:photo', async ctx => {
+	bot.on('message:photo', async (ctx, next) => {
+		await next()
 		logger.debug(
 			{
 				userId: ctx.from?.id,
@@ -26,7 +28,8 @@ export function setupMessageHandlers(bot: Bot<BotContext>): void {
 	})
 
 	// Contact handler
-	bot.on('message:contact', async ctx => {
+	bot.on('message:contact', async (ctx, next) => {
+		await next()
 		logger.debug(
 			{
 				userId: ctx.from?.id,
@@ -37,7 +40,8 @@ export function setupMessageHandlers(bot: Bot<BotContext>): void {
 	})
 
 	// Document handler
-	bot.on('message:document', async ctx => {
+	bot.on('message:document', async (ctx, next) => {
+		await next()
 		logger.debug(
 			{
 				userId: ctx.from?.id,
@@ -48,25 +52,36 @@ export function setupMessageHandlers(bot: Bot<BotContext>): void {
 	})
 
 	// Voice handler
-	bot.on('message:voice', async ctx => {
+	bot.on('message:voice', async (ctx, next) => {
+		await next()
 		logger.debug({ userId: ctx.from?.id }, 'Voice message received')
-		await ctx.reply('Iltimos, matn yoki rasm yuboring.')
+		if (!ctx.session.applicationId) {
+			await ctx.reply('Iltimos, matn yoki rasm yuboring.')
+		}
 	})
 
 	// Video handler
-	bot.on('message:video', async ctx => {
+	bot.on('message:video', async (ctx, next) => {
+		await next()
 		logger.debug({ userId: ctx.from?.id }, 'Video received')
-		await ctx.reply('Iltimos, matn yoki rasm yuboring.')
+		if (!ctx.session.applicationId) {
+			await ctx.reply('Iltimos, matn yoki rasm yuboring.')
+		}
 	})
 
 	// Sticker handler
-	bot.on('message:sticker', async ctx => {
+	bot.on('message:sticker', async (ctx, next) => {
+		await next()
 		logger.debug({ userId: ctx.from?.id }, 'Sticker received')
-		await ctx.reply('Iltimos, matn yoki rasm yuboring.')
+		if (!ctx.session.applicationId) {
+			await ctx.reply('Iltimos, matn yoki rasm yuboring.')
+		}
 	})
 
 	// Default message handler
-	bot.on('message', async ctx => {
+	bot.on('message', async (ctx, next) => {
+		await next()
+		if (ctx.session.applicationId) return
 		logger.warn(
 			{
 				message: ctx.message,

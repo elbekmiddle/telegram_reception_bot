@@ -1,5 +1,5 @@
-import { session } from 'grammy'
-import { SessionData } from '../../types/session'
+import { session, type Context } from 'grammy'
+import type { SessionData } from '../../types/session'
 import { StepKey } from '../../config/constants'
 
 const initialSessionData = (): SessionData => ({
@@ -10,9 +10,10 @@ const initialSessionData = (): SessionData => ({
 	lastActivity: Date.now()
 })
 
-export const sessionMiddleware = session<SessionData>({
+export const sessionMiddleware = session<SessionData, Context>({
 	initial: initialSessionData,
 	getSessionKey: ctx => {
-		return ctx.from?.id.toString()
+		// Must always return a string (grammY types expect string, not undefined)
+		return ctx.from?.id?.toString() ?? ctx.chat?.id?.toString() ?? 'anonymous'
 	}
 })

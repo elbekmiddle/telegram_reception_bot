@@ -19,6 +19,7 @@ export interface SessionData {
 	// Metadata
 	createdAt: number
 	lastActivity: number
+	lastBotMessageId?: number
 }
 
 export interface SessionContext {

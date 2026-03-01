@@ -1,4 +1,4 @@
-import { Application, AnswerFieldType, FileType } from '@prisma/client'
+import { Application, AnswerFieldType, FileType, ApplicationStatus } from '@prisma/client'
 import { applicationRepo } from '../db/repositories/application.repo'
 import { answerRepo } from '../db/repositories/answer.repo'
 import { fileRepo } from '../db/repositories/file.repo'
@@ -6,19 +6,19 @@ import { logger } from '../utils/logger'
 import { StepKey } from '../config/constants'
 
 export class ApplicationService {
-	async createApplication(telegramId: number): Promise<Application> {
+	async createApplication(telegramId: number, vacancyId?: string | null): Promise<Application> {
 		try {
 			// number ni bigint ga aylantirish
 			const existing = await applicationRepo.findByTelegramId(BigInt(telegramId))
-
-			if (existing) {
-				return existing
-			}
+			// Faqat IN_PROGRESS bo'lsa resume qilamiz.
+			// Aks holda (SUBMITTED/APPROVED/REJECTED/CANCELLED) yangi anketa ochamiz.
+			if (existing && existing.status === ApplicationStatus.IN_PROGRESS) return existing
 
 			const app = await applicationRepo.create({
 				telegramId: BigInt(telegramId),
-				status: 'IN_PROGRESS',
-				currentStep: StepKey.PERSON_FULL_NAME
+				status: ApplicationStatus.IN_PROGRESS,
+				currentStep: StepKey.PERSON_FULL_NAME,
+				vacancyId: vacancyId ?? null
 			})
 
 			logger.info({ telegramId, appId: app.id }, 'New application created')
@@ -27,6 +27,19 @@ export class ApplicationService {
 			logger.error({ error, telegramId }, 'Failed to create application')
 			throw error
 		}
+	}
+
+	async updateCurrentStep(applicationId: string, step: string): Promise<void> {
+		try {
+			await applicationRepo.updateStep(applicationId, step)
+		} catch (error) {
+			logger.error({ error, applicationId, step }, 'Failed to update current step')
+			throw error
+		}
+	}
+
+	async setVacancy(applicationId: string, vacancyId: string | null): Promise<void> {
+		await applicationRepo.updateVacancy(applicationId, vacancyId)
 	}
 
 	async saveAnswer(
@@ -44,7 +57,22 @@ export class ApplicationService {
 			})
 
 			logger.debug({ applicationId, fieldKey }, 'Answer saved')
-		} catch (error) {
+		} catch (error: any) {
+			// If DB enum is out-of-sync with Prisma enum (common when migrations weren't applied),
+			// the flow may crash on values like AnswerFieldType.DATE.
+			// Fallback to TEXT so the conversation continues, and log a warning.
+			const msg = String(error?.message ?? '')
+			if (msg.includes('invalid input value for enum') && msg.includes('AnswerFieldType')) {
+				logger.warn({ error, applicationId, fieldKey, fieldType }, 'AnswerFieldType mismatch. Falling back to TEXT.')
+				await answerRepo.save({
+					applicationId,
+					fieldKey,
+					fieldValue,
+					fieldType: AnswerFieldType.TEXT
+				})
+				return
+			}
+
 			logger.error({ error, applicationId, fieldKey }, 'Failed to save answer')
 			throw error
 		}
@@ -75,7 +103,7 @@ export class ApplicationService {
 
 	async submitApplication(applicationId: string): Promise<void> {
 		try {
-			await applicationRepo.updateStatus(applicationId, 'SUBMITTED')
+			await applicationRepo.updateStatus(applicationId, ApplicationStatus.SUBMITTED)
 			logger.info({ applicationId }, 'Application submitted')
 		} catch (error) {
 			logger.error({ error, applicationId }, 'Failed to submit application')
@@ -85,7 +113,7 @@ export class ApplicationService {
 
 	async cancelApplication(applicationId: string): Promise<void> {
 		try {
-			await applicationRepo.updateStatus(applicationId, 'CANCELLED')
+			await applicationRepo.updateStatus(applicationId, ApplicationStatus.CANCELLED)
 			logger.info({ applicationId }, 'Application cancelled')
 		} catch (error) {
 			logger.error({ error, applicationId }, 'Failed to cancel application')

@@ -10,6 +10,7 @@ import { rateLimitMiddleware } from './middlewares/rateLimit'
 import { setupCommands } from './commands'
 import { setupHandlers } from './handlers'
 import { applicationFlow } from './conversations/application.flow'
+import { adminFlow } from './conversations/admin.flow'
 import type { SessionData } from '../types/session'
 
 type BotState = {
@@ -48,6 +49,7 @@ bot.use(sessionMiddleware)
 // Conversations plugin + flow
 bot.use(conversations())
 bot.use(createConversation(applicationFlow, 'applicationFlow'))
+bot.use(createConversation(adminFlow, 'adminFlow'))
 
 // Rate limit/auth: callbacklarni "yeb qo'ymasligi" kerak.
 // Agar rateLimit callbackni bloklasa, rateLimitMiddleware ichida:

@@ -96,6 +96,40 @@ export class PhotoService {
 			stream.end(buffer)
 		})
 	}
+
+	/**
+	 * Oddiy 'average hash' (aHash) - serverda tez tekshirish uchun.
+	 * Bu yuzni 100% aniqlamaydi, lekin butunlay boshqa rasm yuborishni kamaytiradi.
+	 */
+	async computeImageHash(buffer: Buffer): Promise<string> {
+		const size = 8
+		const img = sharp(buffer).resize(size, size, { fit: 'fill' }).grayscale()
+		const { data } = await img.raw().toBuffer({ resolveWithObject: true })
+		const pixels = Array.from(data)
+		const avg = pixels.reduce((a, b) => a + b, 0) / pixels.length
+		let bits = ''
+		for (const p of pixels) bits += p >= avg ? '1' : '0'
+		let hex = ''
+		for (let i = 0; i < bits.length; i += 4) {
+			hex += parseInt(bits.slice(i, i + 4), 2).toString(16)
+		}
+		return hex
+	}
+
+	hammingDistance(hexA: string, hexB: string): number {
+		if (hexA.length !== hexB.length) return Number.MAX_SAFE_INTEGER
+		let dist = 0
+		for (let i = 0; i < hexA.length; i++) {
+			const a = parseInt(hexA[i], 16)
+			const b = parseInt(hexB[i], 16)
+			let x = a ^ b
+			while (x) {
+				dist += x & 1
+				x >>= 1
+			}
+		}
+		return dist
+	}
 }
 
 export const photoService = new PhotoService()
