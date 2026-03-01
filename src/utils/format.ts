@@ -51,18 +51,21 @@ export async function buildSummary(applicationId: string): Promise<string> {
 
 	return `
 👤 *Ism:* ${answerMap.get('full_name') || '—'}
-📅 *Tug\'ilgan sana:* ${answerMap.get('birth_date') || '—'}
+📅 *Tug\'ilgan sana:* ${answerMap.get('birth_date') || '—'}${answerMap.get('birth_age') ? ` (${answerMap.get('birth_age')} yosh)` : ''}
 📍 *Manzil:* ${answerMap.get('address') || '—'}
 📞 *Telefon:* ${answerMap.get('phone') || '—'}
 
 🎓 *Ta'lim:* ${answerMap.get('education_type') || '—'}
 📚 *Mutaxassislik:* ${answerMap.get('speciality') || '—'}
 📜 *Sertifikatlar:* ${certsDisplay || '—'}
+🏷️ *Sertifikat darajalari:* ${answerMap.get('certificates_level') || '—'}
 
-🏢 *Ish tajribasi:* ${answerMap.get('exp_company') || '—'}
+🏢 *Ish tajribasi:* ${answerMap.get('exp_has') === 'YES' ? 'Bor' : answerMap.get('exp_has') === 'NO' ? `Yo'q` : '—'}
+🏢 *Oldin ishlagan joy:* ${answerMap.get('exp_company') || '—'}
 ⏳ *Ishlagan muddat:* ${answerMap.get('exp_duration') || '—'}
 👔 *Lavozim:* ${answerMap.get('exp_position') || '—'}
 ❓ *Ketish sababi:* ${answerMap.get('exp_leave_reason') || '—'}
+🕒 *Biz bilan qancha ishlaydi:* ${answerMap.get('exp_can_work_how_long') || '—'}
 
 💻 *Kompyuter ko\'nikmalari:* ${skillsDisplay || '—'}
 
@@ -84,6 +87,7 @@ export async function buildAdminSummary(applicationId: string): Promise<string> 
 
 	return `
 👤 *Ism:* ${answerMap.get('full_name') || '—'}
+📅 *Tug\'ilgan sana:* ${answerMap.get('birth_date') || '—'}${answerMap.get('birth_age') ? ` (${answerMap.get('birth_age')} yosh)` : ''}
 📞 *Telefon:* ${answerMap.get('phone') || '—'}
 📍 *Manzil:* ${answerMap.get('address') || '—'}
 
