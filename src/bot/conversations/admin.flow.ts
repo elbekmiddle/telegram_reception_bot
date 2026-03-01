@@ -4,7 +4,15 @@ import { InlineKeyboard } from 'grammy'
 import type { BotContext } from '../bot'
 import { logger } from '../../utils/logger'
 import { prisma } from '../../db/prisma'
-import { CourseLevel } from '@prisma/client'
+
+type VacancyItem = Awaited<ReturnType<typeof prisma.vacancy.findMany>>[number]
+type CourseItem = Awaited<ReturnType<typeof prisma.course.findMany>>[number]
+const COURSE_LEVELS = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2', 'IELTS', 'TOEFL', 'OTHER'] as const
+type CourseLevelValue = (typeof COURSE_LEVELS)[number]
+
+function isCourseLevel(value: string): value is CourseLevelValue {
+	return (COURSE_LEVELS as readonly string[]).includes(value)
+}
 
 function isAdmin(ctx: BotContext): boolean {
 	const admin1 = Number(process.env.ADMIN_CHAT_ID || 0)
@@ -185,7 +193,7 @@ export async function adminFlow(
 				}
 
 				let message = '*📋 Vakansiyalar roʻyxati*\n\n'
-				items.forEach((v, index) => {
+				items.forEach((v: VacancyItem, index: number) => {
 					const status = v.isActive ? '✅' : '⛔️'
 					const salary =
 						v.salaryFrom && v.salaryTo
@@ -220,7 +228,7 @@ export async function adminFlow(
 				}
 
 				let message = '*📚 Kurslar roʻyxati*\n\n'
-				items.forEach((c, index) => {
+				items.forEach((c: CourseItem, index: number) => {
 					const status = c.isActive ? '✅' : '⛔️'
 					message += `${index + 1}. ${status} *${c.title}*\n`
 					message += `   🎯 Daraja: ${c.level}\n`
@@ -312,7 +320,7 @@ export async function adminFlow(
 					{ text: '🎯 TOEFL', data: 'TOEFL' },
 					{ text: '📚 Boshqa', data: 'OTHER' }
 				])
-				if (!levelChoice) continue
+				if (!levelChoice || !isCourseLevel(levelChoice)) continue
 
 				const isActiveChoice = await askChoice(conversation, ctx, '⚡️ *Faol qilinsinmi?*', [
 					{ text: '✅ Ha', data: 'YES' },
@@ -326,7 +334,7 @@ export async function adminFlow(
 					data: {
 						title: title.trim(),
 						description: description.trim(),
-						level: levelChoice as CourseLevel,
+						level: levelChoice,
 						isActive
 					}
 				})

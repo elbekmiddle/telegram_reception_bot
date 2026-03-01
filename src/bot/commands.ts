@@ -12,8 +12,6 @@ bot.command('start', async ctx => {
 		const telegramId = ctx.from?.id
 		if (!telegramId) return
 
-		// ✅ ENG MUHIMI: eski flow'larni yop
-		await exitAllConversations(ctx)
 
 		// agar resume/restart flow'ing bo'lsa
 		if (ctx.state.applicationId && ctx.state.inProgress) {

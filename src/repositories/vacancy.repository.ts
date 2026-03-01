@@ -1,4 +1,3 @@
-import { Vacancy } from '@prisma/client'
 import { prisma } from '../db/prisma'
 import { logger } from '../utils/logger'
 
@@ -9,14 +8,14 @@ export type CreateVacancyDTO = {
 }
 
 export class VacancyRepository {
-	async listActive(): Promise<Vacancy[]> {
+	async listActive() {
 		return prisma.vacancy.findMany({
 			where: { isActive: true },
 			orderBy: { createdAt: 'desc' }
 		})
 	}
 
-	async create(data: CreateVacancyDTO): Promise<Vacancy> {
+	async create(data: CreateVacancyDTO) {
 		try {
 			return await prisma.vacancy.create({
 				data: {
