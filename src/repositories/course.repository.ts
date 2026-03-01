@@ -1,23 +1,22 @@
-import { Course, CourseLevel } from '@prisma/client'
 import { prisma } from '../db/prisma'
 import { logger } from '../utils/logger'
 
 export type CreateCourseDTO = {
 	title: string
-	level: CourseLevel
+	level: string
 	description?: string | null
 	isActive?: boolean
 }
 
 export class CourseRepository {
-	async listActive(): Promise<Course[]> {
+	async listActive() {
 		return prisma.course.findMany({
 			where: { isActive: true },
 			orderBy: { createdAt: 'desc' }
 		})
 	}
 
-	async create(data: CreateCourseDTO): Promise<Course> {
+	async create(data: CreateCourseDTO) {
 		try {
 			return await prisma.course.create({
 				data: {

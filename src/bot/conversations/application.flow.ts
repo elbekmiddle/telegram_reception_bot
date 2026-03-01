@@ -112,52 +112,13 @@ async function askInline(
 	}
 }
 
-// async function askText(
-// 	conversation: Conversation<BotContext>,
-// 	ctx: BotContext,
-// 	question: string,
-// 	opts?: { back?: boolean; cancel?: boolean; skip?: boolean }
-// ): Promise<string> {
-// 	const navKb = opts?.back || opts?.cancel || opts?.skip ? buildInlineKb([], opts) : undefined
-// 	await replaceBotMessage(ctx, question, navKb ? { parse_mode: 'Markdown', reply_markup: navKb } : { parse_mode: 'Markdown' })
-
-// 	while (true) {
-// 		const upd = await conversation.wait()
-// 		if (upd.callbackQuery) {
-// 			await upd.answerCallbackQuery()
-// 			const data = upd.callbackQuery.data
-// 			if (!data) continue
-// 			if (data === 'NAV|BACK') throw navError('BACK')
-// 			if (data === 'NAV|CANCEL') throw navError('CANCEL')
-// 			if (data === 'NAV|SKIP') throw navError('SKIP')
-// 			continue
-// 		}
-
-// 		// if (text) return text
-// 		const text = upd.message?.text?.trim()
-
-// 		if (text) {
-// 			if (text === '/start' || text === '/admin' || text === '/cancel') {
-// 				// conversation ichida command ishlamaydi, shuning uchun anketa bekor qilamiz
-// 				throw navError('CANCEL')
-// 			}
-// 			return text
-// 		}
-
-// 		await replaceBotMessage(ctx, 'Iltimos, matn yuboring ✍️')
-// 	}
-// }
 async function askText(
 	conversation: Conversation<BotContext>,
 	ctx: BotContext,
 	question: string,
 	opts?: { back?: boolean; cancel?: boolean; skip?: boolean }
 ): Promise<string> {
-	console.log('📝 askText called with question:', question)
-
 	const navKb = opts?.back || opts?.cancel || opts?.skip ? buildInlineKb([], opts) : undefined
-
-	// replaceBotMessage ishlatish kerak (oldingi xabarni o'chiradi)
 	await replaceBotMessage(
 		ctx,
 		question,
@@ -165,48 +126,29 @@ async function askText(
 	)
 
 	while (true) {
-		console.log('⏳ Waiting for user input...')
 		const upd = await conversation.wait()
-		console.log('📨 Received update type:', upd.updateType)
-
-		// Callback query (navigatsiya tugmalari)
 		if (upd.callbackQuery) {
-			console.log('🔘 Callback query received:', upd.callbackQuery.data)
 			await upd.answerCallbackQuery()
 			const data = upd.callbackQuery.data
 			if (!data) continue
-
 			if (data === 'NAV|BACK') throw navError('BACK')
 			if (data === 'NAV|CANCEL') throw navError('CANCEL')
 			if (data === 'NAV|SKIP') throw navError('SKIP')
-
-			// Agar boshqa callback bo'lsa, uni handle qilish kerak
-			// Bu yerda continue qilamiz chunki bu text emas
-			console.log('ℹ️ Other callback received, ignoring:', data)
 			continue
 		}
 
-		// Message text
-		if (upd.message && upd.message.text) {
-			const text = upd.message.text.trim()
-			console.log('📄 Message text:', text)
-
-			// Komandalarni tekshirish
+		const text = upd.message?.text?.trim()
+		if (text) {
 			if (text === '/start' || text === '/admin' || text === '/cancel') {
-				console.log('🚫 Command received, cancelling:', text)
 				throw navError('CANCEL')
 			}
-
-			// Javobni qabul qilish
-			console.log('✅ Valid text received:', text)
 			return text
 		}
 
-		// Noto'g'ri javob (rasm, video, document, etc)
-		console.log('❌ No valid text received, asking again')
 		await replaceBotMessage(ctx, 'Iltimos, matn yuboring ✍️')
 	}
 }
+
 type MultiOpt = { key: string; label: string }
 
 function buildMultiKb(prefix: string, opts: MultiOpt[], selected: Set<string>, nav?: { back?: boolean; cancel?: boolean }) {
@@ -387,7 +329,7 @@ export async function applicationFlow(conversation: Conversation<BotContext>, ct
 		if (vacancies.length > 0) {
 			const buttons = vacancies
 				.slice(0, 12)
-				.map(v => ({ text: v.title, data: `VAC|${v.id}` }))
+				.map((v: { id: string; title: string }) => ({ text: v.title, data: `VAC|${v.id}` }))
 			const picked = await askInline(
 				conversation,
 				ctx,

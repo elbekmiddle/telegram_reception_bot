@@ -1,5 +1,4 @@
 import { InlineKeyboard } from 'grammy'
-import type { Vacancy } from '@prisma/client'
 
 export const keyboards = {
 	resumeOrRestart(): InlineKeyboard {
@@ -32,7 +31,7 @@ export const keyboards = {
 			.text('❌ Bekor qilish', 'NAV|CANCEL')
 	},
 
-	vacancySelect(vacancies: Vacancy[]): InlineKeyboard {
+	vacancySelect(vacancies: Array<{ id: string; title: string }>): InlineKeyboard {
 		const kb = new InlineKeyboard()
 		for (const v of vacancies.slice(0, 12)) {
 			kb.text(v.title, `VAC|${v.id}`).row()

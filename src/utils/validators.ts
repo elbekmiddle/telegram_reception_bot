@@ -36,7 +36,7 @@ export class Validators {
 		const year = Number(match[3])
 
 		// Basic range check
-		if (year < 1950 || year > new Date().getFullYear()) {
+		if (year < 1900 || year > new Date().getFullYear()) {
 			return { isValid: false }
 		}
 
@@ -51,8 +51,18 @@ export class Validators {
 			return { isValid: false }
 		}
 
-		// 16 yoshdan kichik bo‘lmasin
-		const age = new Date().getFullYear() - year
+		const now = new Date()
+		if (date > now) {
+			return { isValid: false }
+		}
+
+		// 16 yoshdan kichik bo‘lmasin (aniq kun/oy hisobida)
+		let age = now.getFullYear() - year
+		const monthDiff = now.getMonth() - (month - 1)
+		if (monthDiff < 0 || (monthDiff === 0 && now.getDate() < day)) {
+			age -= 1
+		}
+
 		if (age < 16) {
 			return { isValid: false }
 		}

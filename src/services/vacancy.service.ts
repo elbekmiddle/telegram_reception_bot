@@ -1,12 +1,11 @@
-import { Vacancy } from '@prisma/client'
 import { vacancyRepo } from '../repositories/vacancy.repository'
 
 export class VacancyService {
-	listActive(): Promise<Vacancy[]> {
+	listActive() {
 		return vacancyRepo.listActive()
 	}
 
-	create(title: string, description?: string | null): Promise<Vacancy> {
+	create(title: string, description?: string | null) {
 		return vacancyRepo.create({ title, description })
 	}
 }
