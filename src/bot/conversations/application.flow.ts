@@ -407,7 +407,16 @@ export async function applicationFlow(conversation: Conversation<BotContext>, ct
 					)
 					ctx.session.history.push(step)
 					step = nextStep(step)
-					await applicationService.updateCurrentStep(applicationId, step)
+					ctx.session.currentStep = step
+					try {
+						await applicationService.updateCurrentStep(applicationId, step)
+					} catch (error) {
+						// DB step update yiqilsa ham user flow davom etishi kerak.
+						logger.warn(
+							{ error, applicationId, step },
+							'Birthdate step persisted, but step pointer update failed. Continuing flow in session.'
+						)
+					}
 					break
 				}
 
