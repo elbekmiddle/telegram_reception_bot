@@ -1,5 +1,4 @@
 import { InlineKeyboard } from 'grammy'
-import type { Vacancy } from '@prisma/client'
 
 export const keyboards = {
 	resumeOrRestart(): InlineKeyboard {
@@ -16,14 +15,23 @@ export const keyboards = {
 		return kb
 	},
 
-	photoRetryOrRules(): InlineKeyboard {
+	// photoRetryOrRules(): InlineKeyboard {
+	// 	return new InlineKeyboard()
+	// 		.text('🔄 Qayta yuboraman', 'PHOTO|RETRY')
+	// 		.text("📋 Qoidani ko'rsat", 'PHOTO|RULES')
+	// 		.row()
+	// 		.text('❌ Bekor qilish', 'NAV|CANCEL')
+	// },
+
+	photoRetryOrRules: () => {
 		return new InlineKeyboard()
-			.text('🔄 Qayta yuboraman', 'PHOTO|RETRY')
-			.text("📋 Qoidani ko'rsat", 'PHOTO|RULES')
+			.text('📋 Qoidani ko\'rsat', 'PHOTO|RULES')
 			.row()
+			.text('🔄 Qayta urinish', 'PHOTO|RETRY')
+			.row()
+			.text('⬅️ Orqaga', 'NAV|BACK')
 			.text('❌ Bekor qilish', 'NAV|CANCEL')
 	},
-
 	confirmSubmit(): InlineKeyboard {
 		return new InlineKeyboard()
 			.text('✅ Tasdiqlash', 'CONFIRM|SUBMIT')
@@ -32,7 +40,7 @@ export const keyboards = {
 			.text('❌ Bekor qilish', 'NAV|CANCEL')
 	},
 
-	vacancySelect(vacancies: Vacancy[]): InlineKeyboard {
+	vacancySelect(vacancies: Array<{ id: string; title: string }>): InlineKeyboard {
 		const kb = new InlineKeyboard()
 		for (const v of vacancies.slice(0, 12)) {
 			kb.text(v.title, `VAC|${v.id}`).row()

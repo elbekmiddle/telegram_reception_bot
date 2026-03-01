@@ -1,76 +1,67 @@
 import { type Bot } from 'grammy'
-
 import { type BotContext } from './bot'
 import { logger } from '../utils/logger'
-import { StepKey } from '../config/constants'
-import { applicationService } from '../services/application.service'
-import { keyboards } from '../utils/keyboards'
 
 export function setupCommands(bot: Bot<BotContext>): void {
+	// Start command - conversationni boshlaydi
 	bot.command('start', async ctx => {
 		try {
-			const telegramId = ctx.from?.id
-			if (!telegramId) return
+			logger.debug({ userId: ctx.from?.id }, 'Start command received')
 
-			// If there is an in-progress app in DB (loaded in auth middleware), ask resume/restart.
-			if (ctx.state.applicationId && ctx.state.inProgress) {
-				await ctx.reply(
-					"Sizda boshlangan anketa bor. Davom ettirasizmi yoki yangidan boshlaysizmi?",
-					{ reply_markup: keyboards.resumeOrRestart() }
-				)
-				return
+			// Agar conversation active bo'lsa, to'xtatib yangisini boshlaymiz
+			const activeConversations = await ctx.conversation.active()
+			if (activeConversations.length > 0) {
+				await ctx.conversation.exit()
 			}
 
-			// Otherwise create fresh and start flow
-			const app = await applicationService.createApplication(telegramId)
-			ctx.session.applicationId = app.id
-			ctx.session.currentStep = StepKey.PERSON_FULL_NAME
-			ctx.session.history = []
-			ctx.session.temp = {}
-
+			// Application flow ni boshlaymiz
 			await ctx.conversation.enter('applicationFlow')
 		} catch (err) {
-			logger.error({ err, telegramId: ctx.from?.id }, 'Start command failed')
-			await ctx.reply("Xatolik yuz berdi. /start bilan qayta urinib ko'ring.")
+			logger.error({ err, userId: ctx.from?.id }, 'Start command error')
+			await ctx.reply("Xatolik yuz berdi. Qayta urinib ko'ring.")
 		}
 	})
 
-	bot.command('cancel', async ctx => {
+	// Admin command
+	bot.command('admin', async ctx => {
 		try {
-			if (ctx.session.applicationId) {
-				await applicationService.cancelApplication(ctx.session.applicationId)
+			const isAdmin = ctx.from?.id.toString() === process.env.ADMIN_CHAT_ID
+			if (!isAdmin) {
+				await ctx.reply('Bu buyruq faqat adminlar uchun.')
+				return
 			}
-			ctx.session.applicationId = undefined
-			ctx.session.currentStep = StepKey.PERSON_FULL_NAME
-			ctx.session.history = []
-			ctx.session.temp = {}
-			await ctx.reply("Anketa bekor qilindi. /start bilan yangidan boshlang.")
+
+			const activeConversations = await ctx.conversation.active()
+			if (activeConversations.length > 0) {
+				await ctx.conversation.exit()
+			}
+
+			await ctx.conversation.enter('adminFlow')
 		} catch (err) {
-			logger.error({ err, telegramId: ctx.from?.id }, 'Cancel command failed')
+			logger.error({ err, userId: ctx.from?.id }, 'Admin command error')
 			await ctx.reply('Xatolik yuz berdi.')
 		}
 	})
 
-	bot.command('help', async ctx => {
-		await ctx.reply(
-			[
-				'🆘 Yordam:',
-				'/start — anketa boshlash',
-				'/cancel — anketani bekor qilish',
-				'/help — yordam',
-				'/admin — admin panel (faqat adminlar)'
-			].join('\n')
-		)
-	})
+	// Cancel command - conversationni to'xtatadi
+	bot.command('cancel', async ctx => {
+		try {
+			await ctx.conversation.exit()
 
-	bot.command('admin', async ctx => {
-		const admin1 = Number(process.env.ADMIN_CHAT_ID || 0)
-		const admin2 = Number(process.env.ADMIN_CHAT_ID_2 || 0)
-		const id = ctx.from?.id
-		if (!id || (id !== admin1 && id !== admin2)) {
-			await ctx.reply('Ruxsat yo‘q.')
-			return
+			if (ctx.session.applicationId) {
+				// Bu yerda applicationni cancel qilish kerak
+				// applicationService.cancelApplication(ctx.session.applicationId)
+			}
+
+			ctx.session.applicationId = undefined
+			ctx.session.currentStep = undefined
+			ctx.session.history = []
+			ctx.session.temp = {}
+
+			await ctx.reply('❌ Jarayon bekor qilindi. /start bilan qaytadan boshlang.')
+		} catch (err) {
+			logger.error({ err, userId: ctx.from?.id }, 'Cancel command error')
+			await ctx.reply('Xatolik yuz berdi.')
 		}
-		await ctx.conversation.enter('adminFlow')
 	})
 }

@@ -4,7 +4,15 @@ import { InlineKeyboard } from 'grammy'
 import type { BotContext } from '../bot'
 import { logger } from '../../utils/logger'
 import { prisma } from '../../db/prisma'
-import { CourseLevel } from '@prisma/client'
+
+type VacancyItem = Awaited<ReturnType<typeof prisma.vacancy.findMany>>[number]
+type CourseItem = Awaited<ReturnType<typeof prisma.course.findMany>>[number]
+const COURSE_LEVELS = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2', 'IELTS', 'TOEFL', 'OTHER'] as const
+type CourseLevelValue = (typeof COURSE_LEVELS)[number]
+
+function isCourseLevel(value: string): value is CourseLevelValue {
+	return (COURSE_LEVELS as readonly string[]).includes(value)
+}
 
 function isAdmin(ctx: BotContext): boolean {
 	const admin1 = Number(process.env.ADMIN_CHAT_ID || 0)
@@ -15,12 +23,7 @@ function isAdmin(ctx: BotContext): boolean {
 
 async function checkForCancel(ctx: BotContext): Promise<boolean> {
 	const message = ctx.message?.text
-	if (
-		message === '/start' ||
-		message === '/admin' ||
-		message === '◀️ Orqaga' ||
-		message === '🔙 Orqaga'
-	) {
+	if (message === '/start' || message === '/admin') {
 		await ctx.reply('❌ Amal bekor qilindi.', { parse_mode: 'Markdown' })
 		return true
 	}
@@ -43,6 +46,13 @@ async function askText(
 			return null
 		}
 
+		// Handle back button from inline keyboard
+		if (ctx.callbackQuery?.data === 'CANCEL') {
+			await ctx.answerCallbackQuery()
+			await ctx.reply('⬅️ Ortga qaytildi.', { parse_mode: 'Markdown' })
+			return null
+		}
+
 		const text = ctx.message?.text?.trim()
 		if (text) return text
 
@@ -50,62 +60,20 @@ async function askText(
 	}
 }
 
-// async function askChoice(
-// 	conversation: Conversation<BotContext>,
-// 	ctx: BotContext,
-// 	q: string,
-// 	btns: { text: string; data: string }[]
-// ): Promise<string | null> {
-// 	// Add back button to all choice menus
-// 	const kb = new InlineKeyboard()
-// 	for (const b of btns) kb.text(b.text, b.data).row()
-// 	kb.text('◀️ Orqaga', 'CANCEL').row()
-
-// 	await ctx.reply(q, { reply_markup: kb, parse_mode: 'Markdown' })
-
-// 	while (true) {
-// 		const upd = await conversation.wait()
-// 		const ctx = upd as BotContext
-
-// 		// Check for text commands
-// 		if (await checkForCancel(ctx)) {
-// 			return null
-// 		}
-
-// 		if (!ctx.callbackQuery?.data) continue
-
-// 		// Handle cancel button
-// 		if (ctx.callbackQuery.data === 'CANCEL') {
-// 			await ctx.answerCallbackQuery()
-// 			await ctx.reply('❌ Amal bekor qilindi.', { parse_mode: 'Markdown' })
-// 			return null
-// 		}
-
-// 		await ctx.answerCallbackQuery()
-// 		return ctx.callbackQuery.data
-// 	}
-// }
-
 async function askChoice(
 	conversation: Conversation<BotContext>,
 	ctx: BotContext,
 	q: string,
 	btns: { text: string; data: string }[]
 ): Promise<string | null> {
-	// Add back button to all choice menus
 	const kb = new InlineKeyboard()
 
 	// Tugmalarni 2 tadan qatorlarga ajratamiz
 	for (let i = 0; i < btns.length; i += 2) {
-		// Birinchi tugma
 		kb.text(btns[i].text, btns[i].data)
-
-		// Agar ikkinchi tugma mavjud bo'lsa
 		if (i + 1 < btns.length) {
 			kb.text(btns[i + 1].text, btns[i + 1].data)
 		}
-
-		// Yangi qator
 		kb.row()
 	}
 
@@ -128,7 +96,7 @@ async function askChoice(
 		// Handle cancel button
 		if (ctx.callbackQuery.data === 'CANCEL') {
 			await ctx.answerCallbackQuery()
-			await ctx.reply('❌ Amal bekor qilindi.', { parse_mode: 'Markdown' })
+			await ctx.reply('⬅️ Ortga qaytildi.', { parse_mode: 'Markdown' })
 			return null
 		}
 
@@ -163,29 +131,31 @@ export async function adminFlow(
 			// Main menu with back button
 			const action = await showAdminMenu(conversation, ctx)
 
-			// If user cancelled
+			// If user cancelled or went back
 			if (!action) {
-				continue // Show admin menu again
+				// Admin menuga qaytish o'rniga butunlay chiqish
+				await ctx.reply('✅ Admin panelidan chiqildi. /admin bilan qayta kirishingiz mumkin.', {
+					parse_mode: 'Markdown'
+				})
+				return
 			}
 
 			if (action === 'A|VAC_LIST') {
 				const items = await prisma.vacancy.findMany({
 					orderBy: { createdAt: 'desc' },
-					take: 10 // Show only last 10
+					take: 10
 				})
 
 				if (!items.length) {
 					await ctx.reply(
 						'📭 *Vakansiyalar roʻyxati*\n\nHozircha hech qanday vakansiya mavjud emas.',
-						{
-							parse_mode: 'Markdown'
-						}
+						{ parse_mode: 'Markdown' }
 					)
 					continue
 				}
 
 				let message = '*📋 Vakansiyalar roʻyxati*\n\n'
-				items.forEach((v, index) => {
+				items.forEach((v: VacancyItem, index: number) => {
 					const status = v.isActive ? '✅' : '⛔️'
 					const salary =
 						v.salaryFrom && v.salaryTo
@@ -209,7 +179,7 @@ export async function adminFlow(
 			if (action === 'A|COURSE_LIST') {
 				const items = await prisma.course.findMany({
 					orderBy: { createdAt: 'desc' },
-					take: 10 // Show only last 10
+					take: 10
 				})
 
 				if (!items.length) {
@@ -220,7 +190,7 @@ export async function adminFlow(
 				}
 
 				let message = '*📚 Kurslar roʻyxati*\n\n'
-				items.forEach((c, index) => {
+				items.forEach((c: CourseItem, index: number) => {
 					const status = c.isActive ? '✅' : '⛔️'
 					message += `${index + 1}. ${status} *${c.title}*\n`
 					message += `   🎯 Daraja: ${c.level}\n`
@@ -239,7 +209,10 @@ export async function adminFlow(
 
 			if (action === 'A|VAC_ADD') {
 				const title = await askText(conversation, ctx, '📌 *Vakansiya nomi* (title):')
-				if (!title) continue // User cancelled, show admin menu
+				if (!title) {
+					// User cancelled, but don't show menu again, just continue to next iteration
+					continue
+				}
 
 				const description = await askText(
 					conversation,
@@ -312,7 +285,7 @@ export async function adminFlow(
 					{ text: '🎯 TOEFL', data: 'TOEFL' },
 					{ text: '📚 Boshqa', data: 'OTHER' }
 				])
-				if (!levelChoice) continue
+				if (!levelChoice || !isCourseLevel(levelChoice)) continue
 
 				const isActiveChoice = await askChoice(conversation, ctx, '⚡️ *Faol qilinsinmi?*', [
 					{ text: '✅ Ha', data: 'YES' },
@@ -326,7 +299,7 @@ export async function adminFlow(
 					data: {
 						title: title.trim(),
 						description: description.trim(),
-						level: levelChoice as CourseLevel,
+						level: levelChoice,
 						isActive
 					}
 				})

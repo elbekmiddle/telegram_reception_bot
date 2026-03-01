@@ -29,6 +29,71 @@ export class ApplicationService {
 		}
 	}
 
+	// ID bo'yicha arizani olish
+	async getById(applicationId: string): Promise<Application | null> {
+		try {
+			return await applicationRepo.findById(applicationId)
+		} catch (error) {
+			logger.error({ error, applicationId }, 'Failed to get application by id')
+			throw error
+		}
+	}
+
+	// Barcha arizalarni olish (filter bilan)
+	async getAll(params?: {
+		status?: ApplicationStatus
+		telegramId?: bigint
+		orderBy?: { [key: string]: 'asc' | 'desc' }
+		take?: number
+		skip?: number
+	}): Promise<Application[]> {
+		try {
+			return await applicationRepo.findAll(params)
+		} catch (error) {
+			logger.error({ error, params }, 'Failed to get all applications')
+			throw error
+		}
+	}
+
+	// Arizalar sonini olish
+	async count(params?: { status?: ApplicationStatus; telegramId?: bigint }): Promise<number> {
+		try {
+			return await applicationRepo.count(params)
+		} catch (error) {
+			logger.error({ error, params }, 'Failed to count applications')
+			throw error
+		}
+	}
+
+	// Arizani va unga tegishli barcha ma'lumotlarni olish (answers va files bilan)
+	async getFullApplication(applicationId: string): Promise<{
+		application: Application | null
+		answers: any[]
+		files: any[]
+	}> {
+		try {
+			const application = await applicationRepo.findById(applicationId)
+			const answers = await answerRepo.getByApplicationId(applicationId)
+			const files = await fileRepo.getByApplicationId(applicationId)
+
+			return { application, answers, files }
+		} catch (error) {
+			logger.error({ error, applicationId }, 'Failed to get full application')
+			throw error
+		}
+	}
+
+	// Arizani statusini yangilash
+	async updateStatus(applicationId: string, status: ApplicationStatus): Promise<void> {
+		try {
+			await applicationRepo.updateStatus(applicationId, status)
+			logger.info({ applicationId, status }, 'Application status updated')
+		} catch (error) {
+			logger.error({ error, applicationId, status }, 'Failed to update application status')
+			throw error
+		}
+	}
+
 	async updateCurrentStep(applicationId: string, step: string): Promise<void> {
 		try {
 			await applicationRepo.updateStep(applicationId, step)
@@ -63,7 +128,10 @@ export class ApplicationService {
 			// Fallback to TEXT so the conversation continues, and log a warning.
 			const msg = String(error?.message ?? '')
 			if (msg.includes('invalid input value for enum') && msg.includes('AnswerFieldType')) {
-				logger.warn({ error, applicationId, fieldKey, fieldType }, 'AnswerFieldType mismatch. Falling back to TEXT.')
+				logger.warn(
+					{ error, applicationId, fieldKey, fieldType },
+					'AnswerFieldType mismatch. Falling back to TEXT.'
+				)
 				await answerRepo.save({
 					applicationId,
 					fieldKey,

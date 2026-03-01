@@ -1,4 +1,4 @@
-import { Application, ApplicationStatus } from '@prisma/client'
+import { Application, ApplicationStatus, Prisma } from '@prisma/client'
 import { prisma } from '../prisma'
 import { logger } from '../../utils/logger'
 
@@ -94,6 +94,185 @@ export class ApplicationRepository {
 		}
 	}
 
+	// ===== Yangi metodlar =====
+
+	/**
+	 * Barcha arizalarni olish (filter bilan)
+	 */
+	async findAll(params?: {
+		status?: ApplicationStatus
+		telegramId?: bigint
+		orderBy?: { [key: string]: 'asc' | 'desc' }
+		take?: number
+		skip?: number
+	}): Promise<Application[]> {
+		try {
+			const where: Prisma.ApplicationWhereInput = {}
+
+			if (params?.status) {
+				where.status = params.status
+			}
+
+			if (params?.telegramId) {
+				where.telegramId = params.telegramId
+			}
+
+			return await prisma.application.findMany({
+				where,
+				orderBy: params?.orderBy || { createdAt: 'desc' },
+				take: params?.take,
+				skip: params?.skip,
+				include: {
+					answers: true,
+					files: true,
+					vacancy: true
+				}
+			})
+		} catch (error) {
+			logger.error({ error, params }, 'Error finding all applications')
+			throw error
+		}
+	}
+
+	/**
+	 * Arizalar sonini olish (filter bilan)
+	 */
+	async count(params?: { status?: ApplicationStatus; telegramId?: bigint }): Promise<number> {
+		try {
+			const where: Prisma.ApplicationWhereInput = {}
+
+			if (params?.status) {
+				where.status = params.status
+			}
+
+			if (params?.telegramId) {
+				where.telegramId = params.telegramId
+			}
+
+			return await prisma.application.count({ where })
+		} catch (error) {
+			logger.error({ error, params }, 'Error counting applications')
+			throw error
+		}
+	}
+
+	/**
+	 * Arizani barcha bog'langan ma'lumotlari bilan olish (answers va files)
+	 */
+	async getFullApplication(id: string): Promise<
+		| (Application & {
+				answers: any[]
+				files: any[]
+				vacancy: any | null
+		  })
+		| null
+	> {
+		try {
+			return await prisma.application.findUnique({
+				where: { id },
+				include: {
+					answers: true,
+					files: true,
+					vacancy: true
+				}
+			})
+		} catch (error) {
+			logger.error({ error, id }, 'Error getting full application')
+			throw error
+		}
+	}
+
+	/**
+	 * Faqat SUBMITTED statusidagi arizalarni olish
+	 */
+	async findSubmitted(take?: number, skip?: number): Promise<Application[]> {
+		try {
+			return await prisma.application.findMany({
+				where: { status: ApplicationStatus.SUBMITTED },
+				orderBy: { submittedAt: 'desc' },
+				take,
+				skip,
+				include: {
+					answers: true,
+					files: true,
+					vacancy: true
+				}
+			})
+		} catch (error) {
+			logger.error({ error, take, skip }, 'Error finding submitted applications')
+			throw error
+		}
+	}
+
+	/**
+	 * Foydalanuvchining barcha arizalarini olish
+	 */
+	async findByUser(telegramId: bigint): Promise<Application[]> {
+		try {
+			return await prisma.application.findMany({
+				where: { telegramId },
+				orderBy: { createdAt: 'desc' },
+				include: {
+					answers: true,
+					files: true,
+					vacancy: true
+				}
+			})
+		} catch (error) {
+			logger.error({ error, telegramId }, 'Error finding applications by user')
+			throw error
+		}
+	}
+
+	/**
+	 * Arizani o'chirish (soft delete emas, hard delete - ehtiyot bo'ling!)
+	 */
+	async delete(id: string): Promise<Application> {
+		try {
+			// Avval bog'langan ma'lumotlarni o'chirish kerak
+			await prisma.applicationAnswer.deleteMany({
+				where: { applicationId: id }
+			})
+
+			await prisma.applicationFile.deleteMany({
+				where: { applicationId: id }
+			})
+
+			// Keyin arizani o'chirish
+			return await prisma.application.delete({
+				where: { id }
+			})
+		} catch (error) {
+			logger.error({ error, id }, 'Error deleting application')
+			throw error
+		}
+	}
+
+	/**
+	 * Eski arizalarni tozalash (masalan, 30 kundan eski CANCELLED arizalar)
+	 */
+	async deleteOldCancelled(daysOld: number = 30): Promise<number> {
+		try {
+			const date = new Date()
+			date.setDate(date.getDate() - daysOld)
+
+			const result = await prisma.application.deleteMany({
+				where: {
+					status: ApplicationStatus.CANCELLED,
+					updatedAt: {
+						lt: date
+					}
+				}
+			})
+
+			logger.info({ count: result.count, daysOld }, 'Old cancelled applications deleted')
+			return result.count
+		} catch (error) {
+			logger.error({ error, daysOld }, 'Error deleting old cancelled applications')
+			throw error
+		}
+	}
+
 	// ===== Admin actions / helpers =====
 	async getById(id: string): Promise<Application | null> {
 		return this.findById(id)
@@ -101,14 +280,28 @@ export class ApplicationRepository {
 
 	async getWithAnswers(id: string): Promise<(Application & { answers: unknown[] }) | null> {
 		try {
-			return (await prisma.application.findUnique({
+			return await prisma.application.findUnique({
 				where: { id },
 				include: {
 					answers: true
 				}
-			})) as unknown as (Application & { answers: unknown[] }) | null
+			})
 		} catch (error) {
 			logger.error({ error, id }, 'Error getting application with answers')
+			throw error
+		}
+	}
+
+	async getWithFiles(id: string): Promise<(Application & { files: unknown[] }) | null> {
+		try {
+			return await prisma.application.findUnique({
+				where: { id },
+				include: {
+					files: true
+				}
+			})
+		} catch (error) {
+			logger.error({ error, id }, 'Error getting application with files')
 			throw error
 		}
 	}
@@ -118,7 +311,7 @@ export class ApplicationRepository {
 			return await prisma.application.update({
 				where: { id },
 				data: {
-					status: 'APPROVED',
+					status: ApplicationStatus.APPROVED,
 					reviewedAt: new Date(),
 					reviewedBy: reviewedBy != null ? BigInt(reviewedBy) : null,
 					rejectionReason: null
@@ -135,7 +328,7 @@ export class ApplicationRepository {
 			return await prisma.application.update({
 				where: { id },
 				data: {
-					status: 'REJECTED',
+					status: ApplicationStatus.REJECTED,
 					reviewedAt: new Date(),
 					reviewedBy: reviewedBy != null ? BigInt(reviewedBy) : null,
 					rejectionReason: reason
@@ -143,6 +336,25 @@ export class ApplicationRepository {
 			})
 		} catch (error) {
 			logger.error({ error, id, reviewedBy }, 'Error rejecting application')
+			throw error
+		}
+	}
+
+	/**
+	 * Arizani SUBMITTED qilish (topshirish)
+	 */
+	async markAsSubmitted(id: string): Promise<Application> {
+		try {
+			return await prisma.application.update({
+				where: { id },
+				data: {
+					status: ApplicationStatus.SUBMITTED,
+					submittedAt: new Date(),
+					updatedAt: new Date()
+				}
+			})
+		} catch (error) {
+			logger.error({ error, id }, 'Error marking application as submitted')
 			throw error
 		}
 	}

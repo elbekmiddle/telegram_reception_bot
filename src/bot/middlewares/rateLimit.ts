@@ -1,3 +1,4 @@
+// src/bot/middlewares/rateLimit.ts
 import { type Middleware } from 'grammy'
 import { type BotContext } from '../bot'
 import { RateLimit } from '../../config/constants'
@@ -13,6 +14,11 @@ interface RateLimitStore {
 const store: RateLimitStore = {}
 
 export const rateLimitMiddleware: Middleware<BotContext> = async (ctx, next) => {
+	// Callback querylarni rate limitdan o'tkazib yuboramiz
+	if (ctx.callbackQuery) {
+		return next()
+	}
+
 	if (!ctx.from) return next()
 
 	const key = `rate:${ctx.from.id}`

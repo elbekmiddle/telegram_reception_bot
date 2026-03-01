@@ -7,6 +7,7 @@ import { applicationService } from '../../services/application.service'
 import { FileType } from '@prisma/client'
 import { answerRepo } from '../../db/repositories/answer.repo'
 import { AnswerFieldType } from '@prisma/client'
+import { logger } from '../../utils/logger'
 
 export type HalfBodyPhotoResult = {
 	telegramFileId: string
@@ -55,57 +56,91 @@ export class PhotoStep {
 			const u = await conversation.wait()
 
 			if (u.callbackQuery) {
-				await u.answerCallbackQuery()
 				const data = u.callbackQuery.data
+				if (!data) continue
+
+				// MUHIM: Callback query ni DARHOL answer qilish
+				try {
+					await u.answerCallbackQuery()
+				} catch (err) {
+					logger.warn({ err, userId: ctx.from?.id }, 'Failed to answer callback query in PhotoStep')
+				}
+
 				if (data === 'NAV|BACK') throw new Error('BACK')
 				if (data === 'NAV|CANCEL') throw new Error('CANCEL')
+
 				if (data === 'PHOTO|RULES') {
+					// Qoidani ko'rsatish
 					if (lastMessageId) {
 						try {
 							await ctx.api.deleteMessage(ctx.chat!.id, lastMessageId)
-						} catch (error) {}
+						} catch (error) {
+							// ignore
+						}
 					}
 
 					const rulesMsg = await ctx.reply(
 						[
 							"📋 *To'g'ri / noto'g'ri misol:*",
-							"✅ To'g'ri: yuz yaqin, yelka/bel ko'rinadi, fon oddiy.",
-							"❌ Noto'g'ri: pasport 3x4, juda uzoqdan, juda kichik/loyqa, bir necha odam.",
 							'',
-							'Endi rasm yuboring:'
+							'✅ *TOʻGʻRI:*',
+							'• Yuz yaqin, yelka/bel koʻrinadi',
+							'• Fon oddiy va bir xil',
+							'• Yorugʻlik yaxshi',
+							'',
+							'❌ *NOTOʻGʻRI:*',
+							'• Pasport 3x4 rasmi',
+							'• Juda uzoqdan olingan',
+							'• Juda kichik yoki loyqa',
+							'• Bir nechta odam',
+							'',
+							'Endi toʻgʻri rasm yuboring:'
 						].join('\n'),
-						{ parse_mode: 'Markdown' }
+						{ parse_mode: 'Markdown', reply_markup: kb }
 					)
 					lastMessageId = rulesMsg.message_id
 					continue
 				}
+
+				// Boshqa callback querylar ignore qilinadi
+				continue
 			}
 
+			// Rasm tekshirish
 			if (!u.message?.photo?.length) {
+				// Rasm emas, boshqa narsa yuborilgan
 				if (lastMessageId) {
 					try {
 						await ctx.api.deleteMessage(ctx.chat!.id, lastMessageId)
-					} catch (error) {}
+					} catch (error) {
+						// ignore
+					}
 				}
 
-				const errorMsg = await ctx.reply('Iltimos, rasmni PHOTO ko‘rinishida yuboring.', {
+				const errorMsg = await ctx.reply('❌ Iltimos, rasmni *PHOTO* ko‘rinishida yuboring.', {
+					parse_mode: 'Markdown',
 					reply_markup: keyboards.photoRetryOrRules()
 				})
 				lastMessageId = errorMsg.message_id
 				continue
 			}
 
+			// Rasmni validatsiya qilish
 			const best = u.message.photo[u.message.photo.length - 1]
 			const validated = await photoService.validateTelegramPhoto(ctx, best.file_id, rules)
 
 			if (!validated.ok) {
+				// Rasm talablarga javob bermaydi
 				if (lastMessageId) {
 					try {
 						await ctx.api.deleteMessage(ctx.chat!.id, lastMessageId)
-					} catch (error) {}
+					} catch (error) {
+						// ignore
+					}
 				}
 
-				const errorMsg = await ctx.reply(validated.reason, {
+				const errorMsg = await ctx.reply(`❌ *Xatolik:*\n${validated.reason}`, {
+					parse_mode: 'Markdown',
 					reply_markup: keyboards.photoRetryOrRules()
 				})
 				lastMessageId = errorMsg.message_id
@@ -113,50 +148,93 @@ export class PhotoStep {
 			}
 
 			// Rasmni Cloudinary ga yuklash
-			// Qo'shimcha: avvalgi yuborilgan rasm bilan o'xshashligini tekshirish (oddiy aHash)
-			const newHash = await photoService.computeImageHash(validated.buffer)
-			const oldHash = await answerRepo.getByKey(applicationId, 'photo_hash')
-			if (oldHash?.fieldValue) {
-				const dist = photoService.hammingDistance(oldHash.fieldValue, newHash)
-				// juda katta farq bo'lsa - boshqa rasm deb hisoblaymiz
-				if (dist > 10) {
-					if (lastMessageId) {
-						try {
-							await ctx.api.deleteMessage(ctx.chat!.id, lastMessageId)
-						} catch (error) {}
+			try {
+				// Rasm hashini hisoblash
+				const newHash = await photoService.computeImageHash(validated.buffer)
+				const oldHash = await answerRepo.getByKey(applicationId, 'photo_hash')
+
+				if (oldHash?.fieldValue) {
+					const dist = photoService.hammingDistance(oldHash.fieldValue, newHash)
+					// juda katta farq bo'lsa - boshqa rasm deb hisoblaymiz
+					if (dist > 10) {
+						if (lastMessageId) {
+							try {
+								await ctx.api.deleteMessage(ctx.chat!.id, lastMessageId)
+							} catch (error) {
+								// ignore
+							}
+						}
+						const warn = await ctx.reply(
+							"❗ Yuborgan rasmingiz avvalgi rasmingizga mos kelmadi. Iltimos, o'zingizning beldan yuqori rasmingizni yuboring.",
+							{ parse_mode: 'Markdown', reply_markup: keyboards.photoRetryOrRules() }
+						)
+						lastMessageId = warn.message_id
+						continue
 					}
-					const warn = await ctx.reply(
-						"❗ Yuborgan rasmingiz avvalgi rasmingizga mos kelmadi. Iltimos, o'zingizning beldan yuqori rasmingizni yuboring.",
-						{ reply_markup: keyboards.photoRetryOrRules() }
-					)
-					lastMessageId = warn.message_id
-					continue
 				}
-			}
 
-			const uploaded = await photoService.uploadBufferToCloudinary(validated.buffer)
-			await applicationService.saveAnswer(applicationId, 'photo_hash', newHash, AnswerFieldType.TEXT)
+				// Rasmni Cloudinary ga yuklash
+				const uploaded = await photoService.uploadBufferToCloudinary(validated.buffer)
 
-			// Rasm ma'lumotlarini DB ga saqlash
-			await applicationService.saveFile(applicationId, FileType.HALF_BODY, best.file_id, {
-				cloudinaryUrl: uploaded.secureUrl,
-				cloudinaryPublicId: uploaded.publicId,
-				meta: {
-					width: validated.width,
-					height: validated.height,
-					ratio: validated.ratio
+				// Rasm hashini saqlash
+				await applicationService.saveAnswer(
+					applicationId,
+					'photo_hash',
+					newHash,
+					AnswerFieldType.TEXT
+				)
+
+				// Rasm ma'lumotlarini DB ga saqlash
+				await applicationService.saveFile(applicationId, FileType.HALF_BODY, best.file_id, {
+					cloudinaryUrl: uploaded.secureUrl,
+					cloudinaryPublicId: uploaded.publicId,
+					meta: {
+						width: validated.width,
+						height: validated.height,
+						ratio: validated.ratio
+					}
+				})
+
+				// Muvaffaqiyatli yuklandi
+				if (lastMessageId) {
+					try {
+						await ctx.api.deleteMessage(ctx.chat!.id, lastMessageId)
+					} catch (error) {
+						// ignore
+					}
 				}
-			})
 
-			return {
-				telegramFileId: best.file_id,
-				cloudinaryUrl: uploaded.secureUrl,
-				cloudinaryPublicId: uploaded.publicId,
-				meta: {
-					width: validated.width,
-					height: validated.height,
-					ratio: validated.ratio
+				await ctx.reply('✅ Rasm muvaffaqiyatli qabul qilindi!', {
+					parse_mode: 'Markdown'
+				})
+
+				return {
+					telegramFileId: best.file_id,
+					cloudinaryUrl: uploaded.secureUrl,
+					cloudinaryPublicId: uploaded.publicId,
+					meta: {
+						width: validated.width,
+						height: validated.height,
+						ratio: validated.ratio
+					}
 				}
+			} catch (error) {
+				logger.error({ error, applicationId }, 'Failed to upload photo to Cloudinary')
+
+				if (lastMessageId) {
+					try {
+						await ctx.api.deleteMessage(ctx.chat!.id, lastMessageId)
+					} catch (err) {
+						// ignore
+					}
+				}
+
+				const errorMsg = await ctx.reply(
+					'❌ Rasmni yuklashda xatolik yuz berdi. Qayta urinib koʻring.',
+					{ parse_mode: 'Markdown', reply_markup: keyboards.photoRetryOrRules() }
+				)
+				lastMessageId = errorMsg.message_id
+				continue
 			}
 		}
 	}

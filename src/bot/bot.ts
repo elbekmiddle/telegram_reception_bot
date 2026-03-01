@@ -25,40 +25,37 @@ export type BotContext = GrammyContext &
 		state: Partial<BotState>
 	}
 
-/**
- * grammY Context'da default `state` yo'q.
- * Shu middleware har update'da `ctx.state`ni init qiladi.
- */
 const stateMiddleware: MiddlewareFn<BotContext> = async (ctx, next) => {
-	// grammY'da ctx.state yo'q, runtime'da o'zimiz init qilamiz
 	;(ctx as unknown as { state?: Partial<BotState> }).state ??= {}
 	await next()
 }
 
 export const bot = new Bot<BotContext>(env.BOT_TOKEN)
 
-/**
- * MUHIM ORDER:
- * - session -> conversations -> (rateLimit/auth) -> commands/handlers
- * - Callback query'lar conversation.wait() ga yetib borishi uchun
- *   setupHandlers/Commands ichidagi global callback handlerlar next() qilishi kerak.
- */
+// MUHIM ORDER:
+// 1. Session
+// 2. Conversations
+// 3. Rate limit (callbacklarni o'tkazib yuborish kerak)
+// 4. Auth
+// 5. Commands va Handlers
+
 bot.use(stateMiddleware)
 bot.use(sessionMiddleware)
 
-// Conversations plugin + flow
+// Conversations plugin
 bot.use(conversations())
+
+// Conversationlarni register qilish
 bot.use(createConversation(applicationFlow, 'applicationFlow'))
 bot.use(createConversation(adminFlow, 'adminFlow'))
 
-// Rate limit/auth: callbacklarni "yeb qo'ymasligi" kerak.
-// Agar rateLimit callbackni bloklasa, rateLimitMiddleware ichida:
-//   if (ctx.callbackQuery) return next()
-// kabi qoida bo'lishi shart.
+// Rate limit - callbacklarni o'tkazib yuborish uchun
 bot.use(rateLimitMiddleware)
+
+// Auth middleware
 bot.use(authMiddleware)
 
-// Commands/handlers ENG OXIRIDA
+// Commands va handlers eng oxirida
 setupCommands(bot)
 setupHandlers(bot)
 
