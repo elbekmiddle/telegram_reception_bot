@@ -147,6 +147,8 @@ async function askInline(
 // 		await replaceBotMessage(ctx, 'Iltimos, matn yuboring ✍️')
 // 	}
 // }
+// application.flow.ts dagi askText funksiyasini to'liq almashtiring:
+
 async function askText(
 	conversation: Conversation<BotContext>,
 	ctx: BotContext,
@@ -157,12 +159,21 @@ async function askText(
 
 	const navKb = opts?.back || opts?.cancel || opts?.skip ? buildInlineKb([], opts) : undefined
 
-	// replaceBotMessage ishlatish kerak (oldingi xabarni o'chiradi)
-	await replaceBotMessage(
-		ctx,
-		question,
-		navKb ? { parse_mode: 'Markdown', reply_markup: navKb } : { parse_mode: 'Markdown' }
-	)
+	// Agar oldingi xabar bir xil bo'lsa, qayta yubormaslik
+	const lastMsgId = ctx.session.lastBotMessageId
+	if (lastMsgId) {
+		try {
+			await ctx.api.deleteMessage(ctx.chat!.id, lastMsgId)
+		} catch (e) {
+			// ignore
+		}
+	}
+	
+	const sent = await ctx.reply(question, {
+		parse_mode: 'Markdown',
+		...(navKb && { reply_markup: navKb })
+	})
+	ctx.session.lastBotMessageId = sent.message_id
 
 	while (true) {
 		console.log('⏳ Waiting for user input...')
@@ -180,10 +191,10 @@ async function askText(
 			if (data === 'NAV|CANCEL') throw navError('CANCEL')
 			if (data === 'NAV|SKIP') throw navError('SKIP')
 
-			// Agar boshqa callback bo'lsa, uni handle qilish kerak
-			// Bu yerda continue qilamiz chunki bu text emas
-			console.log('ℹ️ Other callback received, ignoring:', data)
-			continue
+			// Boshqa callback'lar (VAC, MAR, etc) - ularni handle qilish uchun
+			// bu funksiyadan chiqib, asosiy flow'ga qaytish kerak
+			console.log('ℹ️ Other callback received, returning:', data)
+			return data
 		}
 
 		// Message text
@@ -197,14 +208,12 @@ async function askText(
 				throw navError('CANCEL')
 			}
 
-			// Javobni qabul qilish
 			console.log('✅ Valid text received:', text)
 			return text
 		}
 
-		// Noto'g'ri javob (rasm, video, document, etc)
 		console.log('❌ No valid text received, asking again')
-		await replaceBotMessage(ctx, 'Iltimos, matn yuboring ✍️')
+		await ctx.reply('Iltimos, matn yuboring ✍️')
 	}
 }
 type MultiOpt = { key: string; label: string }
@@ -420,11 +429,26 @@ export async function applicationFlow(conversation: Conversation<BotContext>, ct
 						'👤 *Ism, familiyangizni kiriting:*\n\nMasalan: *Alisher Karimov*',
 						{ cancel: true }
 					)
+
+					// Agar callback qaytgan bo'lsa (VAC|..., MAR|..., etc)
+					if (name.includes('|')) {
+						if (name.startsWith('VAC|')) {
+							// Vakansiya tanlash tugmasi bosilgan - buni ignore qilamiz
+							// chunki biz allaqachon vakansiya tanlaganmiz
+							console.log('⚠️ Vacancy callback received in name step, ignoring:', name)
+							continue
+						}
+						// Boshqa callback'lar uchun
+						console.log('⚠️ Other callback received in name step:', name)
+						continue
+					}
+
 					const clean = Validators.sanitizeText(name)
 					if (!Validators.validateName(clean)) {
 						await replaceBotMessage(ctx, "😕 Ism-familiya noto'g'ri. Qaytadan kiriting.")
-						break
+						continue
 					}
+
 					await applicationService.saveAnswer(
 						applicationId,
 						'full_name',
@@ -436,7 +460,6 @@ export async function applicationFlow(conversation: Conversation<BotContext>, ct
 					await applicationService.updateCurrentStep(applicationId, step)
 					break
 				}
-
 				case StepKey.PERSON_BIRTHDATE: {
 					const date = await askText(
 						conversation,
@@ -445,15 +468,24 @@ export async function applicationFlow(conversation: Conversation<BotContext>, ct
 						{ back: true, cancel: true }
 					)
 
+					// Agar callback qaytgan bo'lsa
+					if (date.includes('|')) {
+						if (date.startsWith('VAC|')) {
+							console.log('⚠️ Vacancy callback received in birthdate step, ignoring:', date)
+							continue
+						}
+						console.log('⚠️ Other callback received in birthdate step:', date)
+						continue
+					}
+
 					const clean = Validators.normalizeBirthDate(date)
 					const v = Validators.validateBirthDate(clean)
 
 					if (!v.isValid) {
-						// replaceBotMessage ishlatish kerak
 						await replaceBotMessage(ctx, "😕 Sana noto'g'ri formatda. Masalan: *24.03.2004*", {
 							parse_mode: 'Markdown'
 						})
-						continue // qaytadan so'rash
+						continue
 					}
 
 					await applicationService.saveAnswer(

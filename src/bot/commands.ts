@@ -7,36 +7,34 @@ import { applicationService } from '../services/application.service'
 import { keyboards } from '../utils/keyboards'
 
 export function setupCommands(bot: Bot<BotContext>): void {
-bot.command('start', async ctx => {
-	try {
-		const telegramId = ctx.from?.id
-		if (!telegramId) return
+	bot.command('start', async ctx => {
+		try {
+			const telegramId = ctx.from?.id
+			if (!telegramId) return
 
-		// ✅ ENG MUHIMI: eski flow'larni yop
-		await exitAllConversations(ctx)
+			// If there is an in-progress app in DB (loaded in auth middleware), ask resume/restart.
+			if (ctx.state.applicationId && ctx.state.inProgress) {
+				await ctx.reply(
+					"Sizda boshlangan anketa bor. Davom ettirasizmi yoki yangidan boshlaysizmi?",
+					{ reply_markup: keyboards.resumeOrRestart() }
+				)
+				return
+			}
 
-		// agar resume/restart flow'ing bo'lsa
-		if (ctx.state.applicationId && ctx.state.inProgress) {
-			await ctx.reply(
-				'Sizda boshlangan anketa bor. Davom ettirasizmi yoki yangidan boshlaysizmi?',
-				{ reply_markup: keyboards.resumeOrRestart() }
-			)
-			return
+			// Otherwise create fresh and start flow
+			const app = await applicationService.createApplication(telegramId)
+			ctx.session.applicationId = app.id
+			ctx.session.currentStep = StepKey.PERSON_FULL_NAME
+			ctx.session.history = []
+			ctx.session.temp = {}
+
+			await ctx.conversation.enter('applicationFlow')
+		} catch (err) {
+			logger.error({ err, telegramId: ctx.from?.id }, 'Start command failed')
+			await ctx.reply("Xatolik yuz berdi. /start bilan qayta urinib ko'ring.")
 		}
+	})
 
-		const app = await applicationService.createApplication(telegramId)
-		ctx.session.applicationId = app.id
-		ctx.session.currentStep = StepKey.PERSON_FULL_NAME
-		ctx.session.history = []
-		ctx.session.temp = {}
-		ctx.session.lastBotMessageId = undefined
-
-		await ctx.conversation.enter('applicationFlow')
-	} catch (err) {
-		logger.error({ err }, 'Start command failed')
-		await ctx.reply("Xatolik yuz berdi. /start bilan qayta urinib ko'ring.")
-	}
-})
 	bot.command('cancel', async ctx => {
 		try {
 			if (ctx.session.applicationId) {
