@@ -402,7 +402,8 @@ export async function applicationFlow(conversation: Conversation<BotContext>, ct
 						applicationId,
 						'birth_date',
 						clean,
-						AnswerFieldType.DATE
+						// DATE enum eski bazada yo'q bo'lsa flow to'xtab qolmasligi uchun TEXT saqlaymiz.
+						AnswerFieldType.TEXT
 					)
 					ctx.session.history.push(step)
 					step = nextStep(step)

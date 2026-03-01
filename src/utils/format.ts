@@ -1,5 +1,21 @@
 import { answerRepo } from '../db/repositories/answer.repo'
 
+function calculateAgeFromBirthDate(date: string): number | null {
+	const m = date.match(/^(\d{2})\.(\d{2})\.(\d{4})$/)
+	if (!m) return null
+
+	const day = Number(m[1])
+	const month = Number(m[2])
+	const year = Number(m[3])
+	const now = new Date()
+
+	let age = now.getFullYear() - year
+	const monthDiff = now.getMonth() - (month - 1)
+	if (monthDiff < 0 || (monthDiff === 0 && now.getDate() < day)) age -= 1
+
+	return age >= 0 ? age : null
+}
+
 export async function buildSummary(applicationId: string): Promise<string> {
 	const answers = await answerRepo.getByApplicationId(applicationId)
 	const answerMap = new Map(answers.map(a => [a.fieldKey, a.fieldValue]))
@@ -51,18 +67,21 @@ export async function buildSummary(applicationId: string): Promise<string> {
 
 	return `
 👤 *Ism:* ${answerMap.get('full_name') || '—'}
-📅 *Tug\'ilgan sana:* ${answerMap.get('birth_date') || '—'}
+📅 *Tug\'ilgan sana:* ${answerMap.get('birth_date') || '—'}${(() => { const d = answerMap.get('birth_date'); const a = d ? calculateAgeFromBirthDate(d) : null; return a !== null ? ` (${a} yosh)` : '' })()}
 📍 *Manzil:* ${answerMap.get('address') || '—'}
 📞 *Telefon:* ${answerMap.get('phone') || '—'}
 
 🎓 *Ta'lim:* ${answerMap.get('education_type') || '—'}
 📚 *Mutaxassislik:* ${answerMap.get('speciality') || '—'}
 📜 *Sertifikatlar:* ${certsDisplay || '—'}
+🏷️ *Sertifikat darajalari:* ${answerMap.get('certificates_level') || '—'}
 
-🏢 *Ish tajribasi:* ${answerMap.get('exp_company') || '—'}
+🏢 *Ish tajribasi:* ${answerMap.get('exp_has') === 'YES' ? 'Bor' : answerMap.get('exp_has') === 'NO' ? `Yo'q` : '—'}
+🏢 *Oldin ishlagan joy:* ${answerMap.get('exp_company') || '—'}
 ⏳ *Ishlagan muddat:* ${answerMap.get('exp_duration') || '—'}
 👔 *Lavozim:* ${answerMap.get('exp_position') || '—'}
 ❓ *Ketish sababi:* ${answerMap.get('exp_leave_reason') || '—'}
+🕒 *Biz bilan qancha ishlaydi:* ${answerMap.get('exp_can_work_how_long') || '—'}
 
 💻 *Kompyuter ko\'nikmalari:* ${skillsDisplay || '—'}
 
@@ -84,6 +103,7 @@ export async function buildAdminSummary(applicationId: string): Promise<string> 
 
 	return `
 👤 *Ism:* ${answerMap.get('full_name') || '—'}
+📅 *Tug\'ilgan sana:* ${answerMap.get('birth_date') || '—'}${(() => { const d = answerMap.get('birth_date'); const a = d ? calculateAgeFromBirthDate(d) : null; return a !== null ? ` (${a} yosh)` : '' })()}
 📞 *Telefon:* ${answerMap.get('phone') || '—'}
 📍 *Manzil:* ${answerMap.get('address') || '—'}
 
