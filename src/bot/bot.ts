@@ -19,6 +19,7 @@ type BotState = {
 	inProgress?: boolean
 }
 
+
 export type BotContext = GrammyContext &
 	SessionFlavor<SessionData> &
 	ConversationFlavor & {

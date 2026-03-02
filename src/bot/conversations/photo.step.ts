@@ -35,16 +35,37 @@ export class PhotoStep {
 			.text('⬅️ Orqaga', 'NAV|BACK')
 			.text('❌ Bekor qilish', 'NAV|CANCEL')
 
+		// const sentMsg = await ctx.reply(
+		// 	[
+		// 		'📸 *Belidan yuqori rasm yuboring*',
+		// 		'',
+		// 		'✅ Talablar:',
+		// 		"• Rasm *beldan yuqori qismi* bo'lishi kerak",
+		// 		"• Yuzingiz aniq ko'rinsin",
+		// 		'• Tik (portret) format',
+		// 		`• Kamida ${rules.minWidth}x${rules.minHeight} piksel`,
+		// 		"• Boshqa shaxslar bo'lmasligi kerak",
+		// 		'',
+		// 		'Rasmni yuboring:'
+		// 	].join('\n'),
+		// 	{ parse_mode: 'Markdown', reply_markup: kb }
+		// )
+		// photo.step.ts dagi xabar matnini o'zgartirish
+
 		const sentMsg = await ctx.reply(
 			[
 				'📸 *Belidan yuqori rasm yuboring*',
 				'',
-				'✅ Talablar:',
+				'✅ *Talablar:*',
 				"• Rasm *beldan yuqori qismi* bo'lishi kerak",
 				"• Yuzingiz aniq ko'rinsin",
 				'• Tik (portret) format',
-				`• Kamida ${rules.minWidth}x${rules.minHeight} piksel`,
-				"• Boshqa shaxslar bo'lmasligi kerak",
+				`• Minimal o'lcham: ${rules.minWidth}x${rules.minHeight} piksel`,
+				`• Maksimal o'lcham: 4000x4000 piksel`,
+				"• Rasmda faqat siz bo'lishingiz kerak",
+				"• Fon oddiy va bir xil bo'lishi tavsiya etiladi",
+				'',
+				"*Eslatma:* Rasm sifati past bo'lsa yoki juda katta bo'lsa, qayta yuborishingiz kerak bo'ladi.",
 				'',
 				'Rasmni yuboring:'
 			].join('\n'),

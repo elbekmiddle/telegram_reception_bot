@@ -1,27 +1,26 @@
+// types/session.ts
 import { StepKey } from '../config/constants'
 
 export interface SessionData {
-	// Current state
-	currentStep: StepKey
-	history: StepKey[]
-
-	// Application reference
 	applicationId?: string
-
-	// Temporary data
+	currentStep?: StepKey
+	history: StepKey[]
 	temp: {
+		answers: Record<string, any> // Barcha javoblar shu yerda to'planadi
+		vacancyPicked?: boolean
+		vacancyId?: string
+		educationType?: string
+		hasExp?: boolean
+		workShift?: string
+		communicationSkill?: string
+		// Qo'shimcha vaqtinchalik ma'lumotlar
 		waitingFor?: string
 		multiSelect?: Record<string, boolean>
 		customInput?: string
-		
+		[key: string]: any // Boshqa dynamic propertylar uchun
 	}
-
-	// Metadata
-	createdAt: number
-	lastActivity: number
 	lastBotMessageId?: number
+	createdAt?: number
+	lastActivity?: number
 }
-
-export interface SessionContext {
-	session: SessionData
-}
+	

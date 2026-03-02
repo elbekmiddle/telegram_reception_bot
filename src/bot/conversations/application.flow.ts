@@ -8,11 +8,11 @@ import { applicationService } from '../../services/application.service'
 import { vacancyService } from '../../services/vacancy.service'
 import { PhotoStep } from './photo.step'
 import { Validators } from '../../utils/validators'
-import { buildAdminSummary, buildSummary } from '../../utils/format'
+import { buildAdminSummary } from '../../utils/format'
 import { keyboards } from '../../utils/keyboards'
 import { logger } from '../../utils/logger'
-
-type NavSignal = 'BACK' | 'CANCEL' | 'SKIP'
+import { SessionData } from '../../types/session'
+ type NavSignal = 'BACK' | 'CANCEL' | 'SKIP'
 const navError = (sig: NavSignal) => new Error(sig)
 
 function isNavSignal(err: unknown): err is Error {
@@ -20,6 +20,31 @@ function isNavSignal(err: unknown): err is Error {
 		err instanceof Error &&
 		(err.message === 'BACK' || err.message === 'CANCEL' || err.message === 'SKIP')
 	)
+}
+function getFieldType(key: string): AnswerFieldType {
+	const multiChoiceFields = ['certificates', 'computer_skills']
+	const singleChoiceFields = [
+		'marital_status',
+		'education_type',
+		'communication_skill',
+		'can_answer_calls',
+		'client_experience',
+		'dress_code',
+		'stress_tolerance',
+		'work_shift',
+		'exp_has'
+	]
+	const phoneFields = ['phone']
+
+	if (multiChoiceFields.includes(key)) {
+		return AnswerFieldType.MULTI_CHOICE
+	} else if (singleChoiceFields.includes(key)) {
+		return AnswerFieldType.SINGLE_CHOICE
+	} else if (phoneFields.includes(key)) {
+		return AnswerFieldType.PHONE
+	} else {
+		return AnswerFieldType.TEXT
+	}
 }
 
 function popOrFirst(history: StepKey[], fallback: StepKey): StepKey {
@@ -536,7 +561,6 @@ function calculateAgeFromBirthDate(date: string): number | null {
 
 	return age >= 0 ? age : null
 }
-
 export async function applicationFlow(
 	conversation: Conversation<BotContext>,
 	ctx: BotContext
@@ -544,14 +568,24 @@ export async function applicationFlow(
 	const telegramId = ctx.from?.id
 	if (!telegramId) return
 
-	ctx.session.temp ??= {}
+	// Temp ni to'g'ri init qilish
+	if (!ctx.session.temp) {
+		ctx.session.temp = {} as SessionData['temp']
+	}
+
+	// answers obyektini init qilish (agar yo'q bo'lsa)
+	if (!ctx.session.temp.answers) {
+		ctx.session.temp.answers = {}
+	}
 
 	if (!ctx.session.applicationId) {
 		const app = await applicationService.createApplication(telegramId)
 		ctx.session.applicationId = app.id
 		ctx.session.currentStep = StepKey.PERSON_FULL_NAME
 		ctx.session.history = []
-		ctx.session.temp = {}
+		ctx.session.temp = {
+			answers: {} // Barcha javoblar shu yerda to'planadi
+		}
 		ctx.session.createdAt = Date.now()
 		ctx.session.lastActivity = Date.now()
 
@@ -576,7 +610,7 @@ export async function applicationFlow(
 	}
 
 	// Vacancy tanlash
-	if (!(ctx.session.temp as any).vacancyPicked) {
+	if (!ctx.session.temp.vacancyPicked) {
 		const vacancies = await vacancyService.listActive()
 		if (vacancies.length > 0) {
 			const buttons = vacancies
@@ -591,15 +625,14 @@ export async function applicationFlow(
 			)
 			if (picked.startsWith('VAC|')) {
 				const vacancyId = picked.replace('VAC|', '')
+				ctx.session.temp.vacancyId = vacancyId
 				await applicationService.setVacancy(applicationId, vacancyId)
-				;(ctx.session.temp as any).vacancyId = vacancyId
 			}
 		}
-		;(ctx.session.temp as any).vacancyPicked = true
+		ctx.session.temp.vacancyPicked = true
 	}
 
 	let step: StepKey = ctx.session.currentStep
-	ctx.session.temp ??= {}
 
 	while (step !== StepKey.SUBMITTED) {
 		try {
@@ -618,15 +651,10 @@ export async function applicationFlow(
 						await replaceBotMessage(ctx, "😕 Ism-familiya noto'g'ri. Qaytadan kiriting.")
 						break
 					}
-					await applicationService.saveAnswer(
-						applicationId,
-						'full_name',
-						clean,
-						AnswerFieldType.TEXT
-					)
+					// VAQTINCHALIK SAQLASH
+					ctx.session.temp.answers.full_name = clean
 					ctx.session.history.push(step)
 					step = nextStep(step)
-					await applicationService.updateCurrentStep(applicationId, step)
 					break
 				}
 
@@ -648,26 +676,16 @@ export async function applicationFlow(
 						break
 					}
 
-					await applicationService.saveAnswer(
-						applicationId,
-						'birth_date',
-						clean,
-						AnswerFieldType.TEXT
-					)
+					// VAQTINCHALIK SAQLASH
+					ctx.session.temp.answers.birth_date = clean
 
 					const age = calculateAgeFromBirthDate(clean)
 					if (age !== null) {
-						await applicationService.saveAnswer(
-							applicationId,
-							'birth_age',
-							String(age),
-							AnswerFieldType.TEXT
-						)
+						ctx.session.temp.answers.birth_age = String(age)
 					}
 
 					ctx.session.history.push(step)
 					step = nextStep(step)
-					await applicationService.updateCurrentStep(applicationId, step)
 					break
 				}
 
@@ -679,10 +697,10 @@ export async function applicationFlow(
 						{ back: true, cancel: true, oneTime: true }
 					)
 					const clean = Validators.sanitizeText(addr)
-					await applicationService.saveAnswer(applicationId, 'address', clean, AnswerFieldType.TEXT)
+					// VAQTINCHALIK SAQLASH
+					ctx.session.temp.answers.address = clean
 					ctx.session.history.push(step)
 					step = nextStep(step)
-					await applicationService.updateCurrentStep(applicationId, step)
 					break
 				}
 
@@ -703,10 +721,10 @@ export async function applicationFlow(
 						break
 					}
 
-					await applicationService.saveAnswer(applicationId, 'phone', clean, AnswerFieldType.PHONE)
+					// VAQTINCHALIK SAQLASH
+					ctx.session.temp.answers.phone = clean
 					ctx.session.history.push(step)
 					step = nextStep(step)
-					await applicationService.updateCurrentStep(applicationId, step)
 					break
 				}
 
@@ -722,15 +740,10 @@ export async function applicationFlow(
 						],
 						{ back: true, cancel: true, columns: 1 }
 					)
-					await applicationService.saveAnswer(
-						applicationId,
-						'marital_status',
-						data,
-						AnswerFieldType.SINGLE_CHOICE
-					)
+					// VAQTINCHALIK SAQLASH
+					ctx.session.temp.answers.marital_status = data
 					ctx.session.history.push(step)
 					step = nextStep(step)
-					await applicationService.updateCurrentStep(applicationId, step)
 					break
 				}
 
@@ -747,32 +760,22 @@ export async function applicationFlow(
 						{ back: true, cancel: true, columns: 1 }
 					)
 
-					await applicationService.saveAnswer(
-						applicationId,
-						'education_type',
-						data,
-						AnswerFieldType.SINGLE_CHOICE
-					)
-					;(ctx.session.temp as any).educationType = data
+					// VAQTINCHALIK SAQLASH
+					ctx.session.temp.answers.education_type = data
+					ctx.session.temp.educationType = data
 					ctx.session.history.push(step)
 					step = nextStep(step)
-					await applicationService.updateCurrentStep(applicationId, step)
 					break
 				}
 
 				case StepKey.EDU_SPECIALITY: {
-					const eduType = (ctx.session.temp as any).educationType
+					const eduType = ctx.session.temp.educationType
 
 					if (eduType === 'EDU|SCHOOL') {
-						await applicationService.saveAnswer(
-							applicationId,
-							'speciality',
-							"Umumiy o'rta ta'lim",
-							AnswerFieldType.TEXT
-						)
+						// VAQTINCHALIK SAQLASH
+						ctx.session.temp.answers.speciality = "Umumiy o'rta ta'lim"
 						ctx.session.history.push(step)
 						step = nextStep(step)
-						await applicationService.updateCurrentStep(applicationId, step)
 						break
 					}
 
@@ -836,142 +839,15 @@ export async function applicationFlow(
 						speciality = selected.replace('SPEC|', '')
 					}
 
-					await applicationService.saveAnswer(
-						applicationId,
-						'speciality',
-						Validators.sanitizeText(speciality),
-						AnswerFieldType.TEXT
-					)
-
+					// VAQTINCHALIK SAQLASH
+					ctx.session.temp.answers.speciality = speciality
 					ctx.session.history.push(step)
 					step = nextStep(step)
-					await applicationService.updateCurrentStep(applicationId, step)
 					break
 				}
 
-				// case StepKey.EDU_CERTS: {
-				// 	const eduType = (ctx.session.temp as any).educationType
-
-				// 	if (eduType === 'EDU|SCHOOL') {
-				// 		await applicationService.saveAnswer(
-				// 			applicationId,
-				// 			'certificates',
-				// 			JSON.stringify([]),
-				// 			AnswerFieldType.MULTI_CHOICE
-				// 		)
-				// 		await applicationService.saveAnswer(
-				// 			applicationId,
-				// 			'certificates_level',
-				// 			JSON.stringify({}),
-				// 			AnswerFieldType.TEXT
-				// 		)
-				// 		ctx.session.history.push(step)
-				// 		step = nextStep(step)
-				// 		await applicationService.updateCurrentStep(applicationId, step)
-				// 		break
-				// 	}
-
-				// 	const certOptions: MultiOpt[] = [
-				// 		{ key: 'ENGLISH', label: '🇬🇧 Ingliz tili' },
-				// 		{ key: 'ARABIC', label: '🇸🇦 Arab tili' },
-				// 		{ key: 'RUSSIAN', label: '🇷🇺 Rus tili' },
-				// 		{ key: 'GERMAN', label: '🇩🇪 Nemis tili' },
-				// 		{ key: 'KOREAN', label: '🇰🇷 Koreys tili' },
-				// 		{ key: 'TURKISH', label: '🇹🇷 Turk tili' },
-				// 		{ key: 'UZBEK', label: '🇺🇿 Ona tili' },
-				// 		{ key: 'MATH', label: '🧮 Matematika' },
-				// 		{ key: 'PHYSICS', label: '⚛️ Fizika' },
-				// 		{ key: 'CHEMISTRY', label: '🧪 Kimyo' },
-				// 		{ key: 'BIOLOGY', label: '🧬 Biologiya' },
-				// 		{ key: 'HISTORY', label: '📜 Tarix' },
-				// 		{ key: 'LAW', label: '⚖️ Huquq' },
-				// 		{ key: 'OTHER', label: '➕ Boshqa' }
-				// 	]
-
-				// 	const languageKeys = [
-				// 		'ENGLISH',
-				// 		'ARABIC',
-				// 		'RUSSIAN',
-				// 		'GERMAN',
-				// 		'KOREAN',
-				// 		'TURKISH',
-				// 		'UZBEK'
-				// 	]
-
-				// 	const selectedSet = await askMultiSelect(
-				// 		conversation,
-				// 		ctx,
-				// 		'📜 *Qaysi til/fandan sertifikatingiz bor? (bir nechta tanlashingiz mumkin)*',
-				// 		certOptions,
-				// 		new Set<string>(),
-				// 		{ back: true, cancel: true }
-				// 	)
-
-				// 	const selectedArray = Array.from(selectedSet)
-				// 	const levelsMap: Record<string, string> = {}
-
-				// 	const levelButtons: InlineBtn[] = [
-				// 		{ text: 'A1', data: 'LVL|A1' },
-				// 		{ text: 'A2', data: 'LVL|A2' },
-				// 		{ text: 'B1', data: 'LVL|B1' },
-				// 		{ text: 'B2', data: 'LVL|B2' },
-				// 		{ text: 'C1', data: 'LVL|C1' },
-				// 		{ text: 'C2', data: 'LVL|C2' },
-				// 		{ text: 'IELTS', data: 'LVL|IELTS' },
-				// 		{ text: 'TOEFL', data: 'LVL|TOEFL' },
-				// 		{ text: 'Boshqa', data: 'LVL|OTHER' }
-				// 	]
-
-				// 	for (const key of selectedArray) {
-				// 		if (languageKeys.includes(key)) {
-				// 			const certLabel = certOptions.find(opt => opt.key === key)?.label || key
-
-				// 			const picked = await askInline(
-				// 				conversation,
-				// 				ctx,
-				// 				`🏷️ *${certLabel}* darajangiz?`,
-				// 				levelButtons,
-				// 				{ back: true, cancel: true, columns: 3, skip: false }
-				// 			)
-
-				// 			if (picked === 'LVL|OTHER') {
-				// 				levelsMap[key] = Validators.sanitizeText(
-				// 					await askText(
-				// 						conversation,
-				// 						ctx,
-				// 						`✍️ *${certLabel}* darajani yozing (masalan: B2 / IELTS 6.5):`,
-				// 						{ back: true, cancel: true, oneTime: true }
-				// 					)
-				// 				)
-				// 			} else {
-				// 				levelsMap[key] = picked.replace('LVL|', '')
-				// 			}
-				// 		} else {
-				// 			levelsMap[key] = 'SERTIFIKAT'
-				// 		}
-				// 	}
-
-				// 	await applicationService.saveAnswer(
-				// 		applicationId,
-				// 		'certificates',
-				// 		JSON.stringify(selectedArray),
-				// 		AnswerFieldType.MULTI_CHOICE
-				// 	)
-
-				// 	await applicationService.saveAnswer(
-				// 		applicationId,
-				// 		'certificates_level',
-				// 		JSON.stringify(levelsMap),
-				// 		AnswerFieldType.TEXT
-				// 	)
-
-				// 	ctx.session.history.push(step)
-				// 	step = nextStep(step)
-				// 	await applicationService.updateCurrentStep(applicationId, step)
-				// 	break
-				// }
 				case StepKey.EDU_CERTS: {
-					const eduType = (ctx.session.temp as any).educationType
+					const eduType = ctx.session.temp.educationType
 
 					if (eduType === 'EDU|SCHOOL') {
 						// Maktab o'quvchilari uchun sertifikat yo'q
@@ -982,7 +858,7 @@ export async function applicationFlow(
 						break
 					}
 
-					// Sertifikat variantlari - ENDI BITTADAN TANLANADI
+					// Sertifikat variantlari
 					const certOptions: MultiOpt[] = [
 						{ key: 'ENGLISH', label: '🇬🇧 Ingliz tili' },
 						{ key: 'ARABIC', label: '🇸🇦 Arab tili' },
@@ -1081,7 +957,7 @@ export async function applicationFlow(
 				}
 
 				case StepKey.EXP_COMPANY: {
-					const hasExp = (ctx.session.temp as any).hasExp as boolean | undefined
+					const hasExp = ctx.session.temp.hasExp
 
 					if (hasExp == null) {
 						const a = await askInline(
@@ -1094,20 +970,15 @@ export async function applicationFlow(
 							],
 							{ back: true, cancel: true, columns: 2 }
 						)
-						;(ctx.session.temp as any).hasExp = a === 'EXP|YES'
-						await applicationService.saveAnswer(
-							applicationId,
-							'exp_has',
-							(ctx.session.temp as any).hasExp ? 'YES' : 'NO',
-							AnswerFieldType.SINGLE_CHOICE
-						)
+						ctx.session.temp.hasExp = a === 'EXP|YES'
+						ctx.session.temp.answers.exp_has = ctx.session.temp.hasExp ? 'YES' : 'NO'
+						ctx.session.history.push(step)
 						break
 					}
 
 					if (!hasExp) {
 						ctx.session.history.push(step)
 						step = StepKey.EXP_CAN_WORK_HOW_LONG
-						await applicationService.updateCurrentStep(applicationId, step)
 						break
 					}
 
@@ -1117,15 +988,10 @@ export async function applicationFlow(
 						"💼 *Oldin qayerda ishlagansiz?*\n\nMasalan: *Klinika / Call-center / Do'kon*",
 						{ back: true, cancel: true, oneTime: true }
 					)
-					await applicationService.saveAnswer(
-						applicationId,
-						'exp_company',
-						Validators.sanitizeText(company),
-						AnswerFieldType.TEXT
-					)
+					// VAQTINCHALIK SAQLASH
+					ctx.session.temp.answers.exp_company = Validators.sanitizeText(company)
 					ctx.session.history.push(step)
 					step = nextStep(step)
-					await applicationService.updateCurrentStep(applicationId, step)
 					break
 				}
 
@@ -1155,15 +1021,10 @@ export async function applicationFlow(
 						)
 					}
 
-					await applicationService.saveAnswer(
-						applicationId,
-						'exp_duration',
-						value,
-						AnswerFieldType.SINGLE_CHOICE
-					)
+					// VAQTINCHALIK SAQLASH
+					ctx.session.temp.answers.exp_duration = value
 					ctx.session.history.push(step)
 					step = nextStep(step)
-					await applicationService.updateCurrentStep(applicationId, step)
 					break
 				}
 
@@ -1173,15 +1034,10 @@ export async function applicationFlow(
 						cancel: true,
 						oneTime: true
 					})
-					await applicationService.saveAnswer(
-						applicationId,
-						'exp_position',
-						Validators.sanitizeText(pos),
-						AnswerFieldType.TEXT
-					)
+					// VAQTINCHALIK SAQLASH
+					ctx.session.temp.answers.exp_position = Validators.sanitizeText(pos)
 					ctx.session.history.push(step)
 					step = nextStep(step)
-					await applicationService.updateCurrentStep(applicationId, step)
 					break
 				}
 
@@ -1192,68 +1048,13 @@ export async function applicationFlow(
 						skip: true,
 						oneTime: true
 					})
-					await applicationService.saveAnswer(
-						applicationId,
-						'exp_leave_reason',
-						Validators.sanitizeText(reason),
-						AnswerFieldType.TEXT
-					)
+					// VAQTINCHALIK SAQLASH
+					ctx.session.temp.answers.exp_leave_reason = Validators.sanitizeText(reason)
 					ctx.session.history.push(step)
 					step = nextStep(step)
-					await applicationService.updateCurrentStep(applicationId, step)
 					break
 				}
 
-				// case StepKey.EXP_CAN_WORK_HOW_LONG: {
-				// 	const buttons: InlineBtn[] = [
-				// 		{ text: '🕐 3 oygacha', data: 'DUR|UPTO_3M' },
-				// 		{ text: '📅 6 oygacha', data: 'DUR|UPTO_6M' },
-				// 		{ text: '📆 1 yilgacha', data: 'DUR|UPTO_1Y' },
-				// 		{ text: '⏳ 1-2 yil', data: 'DUR|1_2Y' },
-				// 		{ text: '🔮 2+ yil', data: 'DUR|2P_Y' },
-				// 		{ text: '❓ Aniq emas', data: 'DUR|UNKNOWN' },
-				// 		{ text: '✍️ Boshqa', data: 'DUR|CUSTOM' }
-				// 	]
-
-				// 	const selected = await askInline(
-				// 		conversation,
-				// 		ctx,
-				// 		'🕒 *Biz bilan qancha muddat ishlay olasiz?*',
-				// 		buttons,
-				// 		{ back: true, cancel: true, columns: 2 }
-				// 	)
-
-				// 	let howLong = ''
-
-				// 	if (selected === 'DUR|UPTO_3M') howLong = '3 oygacha'
-				// 	else if (selected === 'DUR|UPTO_6M') howLong = '6 oygacha'
-				// 	else if (selected === 'DUR|UPTO_1Y') howLong = '1 yilgacha'
-				// 	else if (selected === 'DUR|1_2Y') howLong = '1-2 yil'
-				// 	else if (selected === 'DUR|2P_Y') howLong = '2+ yil'
-				// 	else if (selected === 'DUR|UNKNOWN') howLong = 'Aniq emas'
-				// 	else if (selected === 'DUR|CUSTOM') {
-				// 		howLong = await askText(
-				// 			conversation,
-				// 			ctx,
-				// 			'✍️ *Qancha muddat ishlay olasiz? Yozing:*',
-				// 			{ back: true, cancel: true, oneTime: true }
-				// 		)
-				// 	} else {
-				// 		howLong = selected.replace('DUR|', '')
-				// 	}
-
-				// 	await applicationService.saveAnswer(
-				// 		applicationId,
-				// 		'exp_can_work_how_long',
-				// 		howLong,
-				// 		AnswerFieldType.TEXT
-				// 	)
-
-				// 	ctx.session.history.push(step)
-				// 	step = nextStep(step)
-				// 	await applicationService.updateCurrentStep(applicationId, step)
-				// 	break
-				// }
 				case StepKey.EXP_CAN_WORK_HOW_LONG: {
 					const buttons: InlineBtn[] = [
 						{ text: '🕐 3 oygacha', data: 'DUR|UPTO_3M' },
@@ -1288,7 +1089,6 @@ export async function applicationFlow(
 					} else if (selected === 'DUR|UNKNOWN') {
 						howLong = 'Aniq emas'
 					} else if (selected === 'DUR|CUSTOM') {
-						// Qo'lda kiritish
 						howLong = await askText(
 							conversation,
 							ctx,
@@ -1299,16 +1099,10 @@ export async function applicationFlow(
 						howLong = selected.replace('DUR|', '')
 					}
 
-					await applicationService.saveAnswer(
-						applicationId,
-						'exp_can_work_how_long',
-						howLong,
-						AnswerFieldType.TEXT
-					)
-
+					// VAQTINCHALIK SAQLASH
+					ctx.session.temp.answers.exp_can_work_how_long = howLong
 					ctx.session.history.push(step)
 					step = nextStep(step)
-					await applicationService.updateCurrentStep(applicationId, step)
 					break
 				}
 
@@ -1327,15 +1121,10 @@ export async function applicationFlow(
 						new Set<string>(),
 						{ back: true, cancel: true }
 					)
-					await applicationService.saveAnswer(
-						applicationId,
-						'computer_skills',
-						JSON.stringify([...selected]),
-						AnswerFieldType.MULTI_CHOICE
-					)
+					// VAQTINCHALIK SAQLASH
+					ctx.session.temp.answers.computer_skills = Array.from(selected)
 					ctx.session.history.push(step)
 					step = nextStep(step)
-					await applicationService.updateCurrentStep(applicationId, step)
 					break
 				}
 
@@ -1355,16 +1144,11 @@ export async function applicationFlow(
 						{ back: true, cancel: true, columns: 2 }
 					)
 
-					await applicationService.saveAnswer(
-						applicationId,
-						'communication_skill',
-						comm,
-						AnswerFieldType.SINGLE_CHOICE
-					)
-					;(ctx.session.temp as any).communicationSkill = comm
+					// VAQTINCHALIK SAQLASH
+					ctx.session.temp.answers.communication_skill = comm
+					ctx.session.temp.communicationSkill = comm
 					ctx.session.history.push(step)
 					step = nextStep(step)
-					await applicationService.updateCurrentStep(applicationId, step)
 					break
 				}
 
@@ -1379,15 +1163,10 @@ export async function applicationFlow(
 						],
 						{ back: true, cancel: true, columns: 1 }
 					)
-					await applicationService.saveAnswer(
-						applicationId,
-						'can_answer_calls',
-						calls,
-						AnswerFieldType.SINGLE_CHOICE
-					)
+					// VAQTINCHALIK SAQLASH
+					ctx.session.temp.answers.can_answer_calls = calls
 					ctx.session.history.push(step)
 					step = nextStep(step)
-					await applicationService.updateCurrentStep(applicationId, step)
 					break
 				}
 
@@ -1402,15 +1181,10 @@ export async function applicationFlow(
 						],
 						{ back: true, cancel: true, columns: 1 }
 					)
-					await applicationService.saveAnswer(
-						applicationId,
-						'client_experience',
-						exp,
-						AnswerFieldType.SINGLE_CHOICE
-					)
+					// VAQTINCHALIK SAQLASH
+					ctx.session.temp.answers.client_experience = exp
 					ctx.session.history.push(step)
 					step = nextStep(step)
-					await applicationService.updateCurrentStep(applicationId, step)
 					break
 				}
 
@@ -1425,15 +1199,10 @@ export async function applicationFlow(
 						],
 						{ back: true, cancel: true, columns: 1 }
 					)
-					await applicationService.saveAnswer(
-						applicationId,
-						'dress_code',
-						dress,
-						AnswerFieldType.SINGLE_CHOICE
-					)
+					// VAQTINCHALIK SAQLASH
+					ctx.session.temp.answers.dress_code = dress
 					ctx.session.history.push(step)
 					step = nextStep(step)
-					await applicationService.updateCurrentStep(applicationId, step)
 					break
 				}
 
@@ -1449,15 +1218,10 @@ export async function applicationFlow(
 						],
 						{ back: true, cancel: true, columns: 1 }
 					)
-					await applicationService.saveAnswer(
-						applicationId,
-						'stress_tolerance',
-						stress,
-						AnswerFieldType.SINGLE_CHOICE
-					)
+					// VAQTINCHALIK SAQLASH
+					ctx.session.temp.answers.stress_tolerance = stress
 					ctx.session.history.push(step)
 					step = nextStep(step)
-					await applicationService.updateCurrentStep(applicationId, step)
 					break
 				}
 
@@ -1473,50 +1237,16 @@ export async function applicationFlow(
 						{ back: true, cancel: true, columns: 1 }
 					)
 
-					await applicationService.saveAnswer(
-						applicationId,
-						'work_shift',
-						shift,
-						AnswerFieldType.SINGLE_CHOICE
-					)
-					;(ctx.session.temp as any).workShift = shift
+					// VAQTINCHALIK SAQLASH
+					ctx.session.temp.answers.work_shift = shift
+					ctx.session.temp.workShift = shift
 					ctx.session.history.push(step)
 					step = nextStep(step)
-					await applicationService.updateCurrentStep(applicationId, step)
 					break
 				}
 
-				// case StepKey.WORK_SALARY: {
-				// 	const shift = (ctx.session.temp as any).workShift
-
-				// 	let question = '💰 *Oylik kutilmangiz qancha?*'
-				// 	let placeholder = 'Masalan: *3 000 000 so‘m*'
-
-				// 	if (shift === 'SHIFT|HALF') {
-				// 		question = '💰 *Yarim stavka uchun oylik kutilmangiz qancha?*'
-				// 		placeholder = 'Masalan: *1 500 000 so‘m*'
-				// 	}
-
-				// 	const salary = await askText(conversation, ctx, `${question}\n\n${placeholder}`, {
-				// 		back: true,
-				// 		cancel: true,
-				// 		oneTime: true
-				// 	})
-
-				// 	await applicationService.saveAnswer(
-				// 		applicationId,
-				// 		'expected_salary',
-				// 		Validators.sanitizeText(salary),
-				// 		AnswerFieldType.TEXT
-				// 	)
-
-				// 	ctx.session.history.push(step)
-				// 	step = nextStep(step)
-				// 	await applicationService.updateCurrentStep(applicationId, step)
-				// 	break
-				// }
 				case StepKey.WORK_SALARY: {
-					const shift = (ctx.session.temp as any).workShift
+					const shift = ctx.session.temp.workShift
 
 					let question = '💰 *Oylik kutilmangiz qancha?*'
 					let placeholder = 'Masalan: *3 000 000 so‘m*'
@@ -1526,7 +1256,6 @@ export async function applicationFlow(
 						placeholder = 'Masalan: *1 500 000 so‘m*'
 					}
 
-					// Oylik variantlari
 					const buttons: InlineBtn[] = [
 						{ text: '💰 2-3 million', data: 'SALARY|2_3M' },
 						{ text: '💰 3-4 million', data: 'SALARY|3_4M' },
@@ -1573,80 +1302,15 @@ export async function applicationFlow(
 						salary = selected.replace('SALARY|', '')
 					}
 
-					// Vaqtinchalik saqlash
+					// VAQTINCHALIK SAQLASH
 					ctx.session.temp.answers.expected_salary = salary
-
 					ctx.session.history.push(step)
 					step = nextStep(step)
 					break
 				}
 
-				// case StepKey.WORK_START_DATE: {
-				// 	const shift = (ctx.session.temp as any).workShift
-
-				// 	let question = '🚀 *Qachondan ish boshlay olasiz?*'
-				// 	let placeholder = 'Masalan: *01.03.2026* yoki *bugun/ertaga*'
-
-				// 	if (shift === 'SHIFT|HALF') {
-				// 		question = '🚀 *Yarim stavkada qachondan ish boshlay olasiz?*'
-				// 	}
-
-				// 	// Ish boshlash variantlari uchun tugmalar
-				// 	const buttons: InlineBtn[] = [
-				// 		{ text: '📅 Bugun', data: 'START|TODAY' },
-				// 		{ text: '⏳ Ertaga', data: 'START|TOMORROW' },
-				// 		{ text: '📆 1 haftadan', data: 'START|1WEEK' },
-				// 		{ text: '📆 2 haftadan', data: 'START|2WEEKS' },
-				// 		{ text: '📆 1 oydan', data: 'START|1MONTH' },
-				// 		{ text: "✍️ Qo'lda kiritish", data: 'START|CUSTOM' }
-				// 	]
-
-				// 	const selected = await askInline(
-				// 		conversation,
-				// 		ctx,
-				// 		`${question}\n\n${placeholder}`,
-				// 		buttons,
-				// 		{ back: true, cancel: true, columns: 2 }
-				// 	)
-
-				// 	let startDate = ''
-
-				// 	if (selected === 'START|TODAY') {
-				// 		startDate = 'Bugun'
-				// 	} else if (selected === 'START|TOMORROW') {
-				// 		startDate = 'Ertaga'
-				// 	} else if (selected === 'START|1WEEK') {
-				// 		startDate = '1 haftadan keyin'
-				// 	} else if (selected === 'START|2WEEKS') {
-				// 		startDate = '2 haftadan keyin'
-				// 	} else if (selected === 'START|1MONTH') {
-				// 		startDate = '1 oydan keyin'
-				// 	} else if (selected === 'START|CUSTOM') {
-				// 		// Qo'lda kiritish
-				// 		startDate = await askText(
-				// 			conversation,
-				// 			ctx,
-				// 			'✍️ *Ish boshlash sanasini yozing:*\n\nMasalan: *01.03.2026* yoki *bugun/ertaga*',
-				// 			{ back: true, cancel: true, oneTime: true }
-				// 		)
-				// 	} else {
-				// 		startDate = selected.replace('START|', '')
-				// 	}
-
-				// 	await applicationService.saveAnswer(
-				// 		applicationId,
-				// 		'start_date',
-				// 		Validators.sanitizeText(startDate),
-				// 		AnswerFieldType.TEXT
-				// 	)
-
-				// 	ctx.session.history.push(step)
-				// 	step = nextStep(step)
-				// 	await applicationService.updateCurrentStep(applicationId, step)
-				// 	break
-				// }
 				case StepKey.WORK_START_DATE: {
-					const shift = (ctx.session.temp as any).workShift
+					const shift = ctx.session.temp.workShift
 
 					let question = '🚀 *Qachondan ish boshlay olasiz?*'
 					let placeholder = 'Masalan: *01.03.2026* yoki *bugun/ertaga*'
@@ -1655,7 +1319,6 @@ export async function applicationFlow(
 						question = '🚀 *Yarim stavkada qachondan ish boshlay olasiz?*'
 					}
 
-					// Ish boshlash variantlari
 					const buttons: InlineBtn[] = [
 						{ text: '📅 Bugun', data: 'START|TODAY' },
 						{ text: '⏳ Ertaga', data: 'START|TOMORROW' },
@@ -1696,9 +1359,8 @@ export async function applicationFlow(
 						startDate = selected.replace('START|', '')
 					}
 
-					// Vaqtinchalik saqlash
+					// VAQTINCHALIK SAQLASH
 					ctx.session.temp.answers.start_date = startDate
-
 					ctx.session.history.push(step)
 					step = nextStep(step)
 					break
@@ -1714,7 +1376,6 @@ export async function applicationFlow(
 					await PhotoStep.handle(conversation, ctx, rules, applicationId)
 					ctx.session.history.push(step)
 					step = nextStep(step)
-					await applicationService.updateCurrentStep(applicationId, step)
 					break
 				}
 
@@ -1746,7 +1407,6 @@ export async function applicationFlow(
 					}
 					ctx.session.history.push(step)
 					step = nextStep(step)
-					await applicationService.updateCurrentStep(applicationId, step)
 					break
 				}
 
@@ -1778,12 +1438,12 @@ export async function applicationFlow(
 					}
 					ctx.session.history.push(step)
 					step = nextStep(step)
-					await applicationService.updateCurrentStep(applicationId, step)
 					break
 				}
 
 				case StepKey.REVIEW_CONFIRM: {
-					const summary = await buildSummary(applicationId)
+					// Vaqtinchalik ma'lumotlardan summary yaratish
+					const summary = buildSummaryFromTemp(ctx.session.temp.answers)
 
 					await replaceBotMessage(
 						ctx,
@@ -1817,8 +1477,29 @@ export async function applicationFlow(
 					}
 
 					if (data === 'CONFIRM|SUBMIT') {
+						// BARCHA MA'LUMOTLARNI BAZAGA SAQLASH
+						const answers = ctx.session.temp.answers
+
+						for (const [key, value] of Object.entries(answers)) {
+							if (value !== undefined && value !== null) {
+								await applicationService.saveAnswer(
+									applicationId,
+									key,
+									typeof value === 'object' ? JSON.stringify(value) : String(value),
+									getFieldType(key)
+								)
+							}
+						}
+
+						// Vakansiyani saqlash
+						if (ctx.session.temp.vacancyId) {
+							await applicationService.setVacancy(applicationId, ctx.session.temp.vacancyId)
+						}
+
+						// Arizani topshirish
 						await applicationService.submitApplication(applicationId)
 
+						// Admin panelga yuborish
 						const adminSummary = await buildAdminSummary(applicationId)
 						const adminKb = new InlineKeyboard()
 							.text('✅ Qabul qilish', `ADMIN|APPROVE|${applicationId}`)
@@ -1857,7 +1538,7 @@ export async function applicationFlow(
 					ctx.session.applicationId = undefined
 					ctx.session.currentStep = StepKey.PERSON_FULL_NAME
 					ctx.session.history = []
-					ctx.session.temp = {}
+					ctx.session.temp = {} as SessionData['temp']
 					ctx.session.lastBotMessageId = undefined
 					await replaceBotMessage(
 						ctx,
@@ -1889,4 +1570,37 @@ export async function applicationFlow(
 			return
 		}
 	}
+}
+
+// Yordamchi funksiya - temp.answers dan summary yaratish
+function buildSummaryFromTemp(answers: Record<string, any>): string {
+	let summary = ''
+
+	if (answers.full_name) summary += `👤 Ism: ${answers.full_name}\n`
+	if (answers.birth_date)
+		summary += `📅 Tug'ilgan sana: ${answers.birth_date}${
+			answers.birth_age ? ` (${answers.birth_age} yosh)` : ''
+		}\n`
+	if (answers.address) summary += `📍 Manzil: ${answers.address}\n`
+	if (answers.phone) summary += `📞 Telefon: ${answers.phone}\n`
+	if (answers.marital_status)
+		summary += `💍 Oilaviy holat: ${answers.marital_status.replace('MAR|', '')}\n`
+	if (answers.education_type)
+		summary += `🎓 Ta'lim: ${answers.education_type.replace('EDU|', '')}\n`
+	if (answers.speciality) summary += `📚 Mutaxassislik: ${answers.speciality}\n`
+	if (answers.certificates && answers.certificates.length > 0) {
+		summary += `📜 Sertifikatlar: ${answers.certificates.join(', ')}\n`
+	}
+	if (answers.exp_has) summary += `💼 Tajriba: ${answers.exp_has === 'YES' ? 'Bor' : "Yo'q"}\n`
+	if (answers.exp_company) summary += `🏢 Ish joyi: ${answers.exp_company}\n`
+	if (answers.exp_duration) summary += `⏳ Ish muddati: ${answers.exp_duration}\n`
+	if (answers.exp_position) summary += `👔 Lavozim: ${answers.exp_position}\n`
+	if (answers.exp_can_work_how_long)
+		summary += `🕒 Biz bilan ishlash: ${answers.exp_can_work_how_long}\n`
+	if (answers.computer_skills) summary += `💻 Kompyuter: ${answers.computer_skills.join(', ')}\n`
+	if (answers.communication_skill) summary += `🗣️ Muloqot: ${answers.communication_skill}\n`
+	if (answers.expected_salary) summary += `💰 Oylik: ${answers.expected_salary}\n`
+	if (answers.start_date) summary += `🚀 Boshlash: ${answers.start_date}\n`
+
+	return summary
 }
