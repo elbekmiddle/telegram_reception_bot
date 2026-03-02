@@ -54,6 +54,12 @@ function popOrFirst(history: StepKey[], fallback: StepKey): StepKey {
 	return next ?? fallback
 }
 
+function getCallbackMessageId(upd: Awaited<ReturnType<Conversation<BotContext>['wait']>>): number | null {
+	const msg = upd.callbackQuery?.message
+	if (!msg || !('message_id' in msg)) return null
+	return msg.message_id
+}
+
 async function handleNavSignal(
 	ctx: BotContext,
 	applicationId: string,
@@ -252,6 +258,16 @@ async function askPhone(
 		const upd = await conversation.wait()
 
 		if (upd.callbackQuery) {
+			const callbackMessageId = getCallbackMessageId(upd)
+			if (
+				ctx.session.lastBotMessageId &&
+				callbackMessageId &&
+				callbackMessageId !== ctx.session.lastBotMessageId
+			) {
+				await upd.answerCallbackQuery().catch(() => undefined)
+				continue
+			}
+
 			const data = upd.callbackQuery.data
 			if (!data) continue
 
@@ -347,6 +363,16 @@ async function askInline(
 
 		// Callback query kelganligini tekshirish
 		if (upd.callbackQuery) {
+			const callbackMessageId = getCallbackMessageId(upd)
+			if (
+				ctx.session.lastBotMessageId &&
+				callbackMessageId &&
+				callbackMessageId !== ctx.session.lastBotMessageId
+			) {
+				await upd.answerCallbackQuery().catch(() => undefined)
+				continue
+			}
+
 			const data = upd.callbackQuery.data
 			if (!data) continue
 
@@ -386,7 +412,6 @@ async function askInline(
 			}
 		}
 
- main
 		if (upd.message) {
 			await replaceBotMessage(ctx, 'Iltimos, quyidagi tugmalardan birini tanlang 👇', {
 				parse_mode: 'Markdown',
@@ -441,6 +466,16 @@ async function askText(
 		const upd = await conversation.wait()
 
 		if (upd.callbackQuery) {
+			const callbackMessageId = getCallbackMessageId(upd)
+			if (
+				ctx.session.lastBotMessageId &&
+				callbackMessageId &&
+				callbackMessageId !== ctx.session.lastBotMessageId
+			) {
+				await upd.answerCallbackQuery().catch(() => undefined)
+				continue
+			}
+
 			const data = upd.callbackQuery.data
 			if (!data) continue
 
@@ -491,11 +526,13 @@ async function askMultiSelect(
 ): Promise<Set<string>> {
 	const prefix = 'M'
 	const selected = new Set<string>(initial)
+	let currentMessageId: number
 
 	const sent = await replaceBotMessage(ctx, question, {
 		parse_mode: 'Markdown',
 		reply_markup: buildMultiKb(prefix, options, selected, nav)
 	})
+	currentMessageId = sent.message_id
 
 	while (true) {
 		const upd = await conversation.wait()
@@ -515,6 +552,16 @@ async function askMultiSelect(
 		const data = upd.callbackQuery.data
 		if (!data) continue
 
+		const callbackMessageId = getCallbackMessageId(upd)
+		if (
+			ctx.session.lastBotMessageId &&
+			callbackMessageId &&
+			callbackMessageId !== ctx.session.lastBotMessageId
+		) {
+			await upd.answerCallbackQuery().catch(() => undefined)
+			continue
+		}
+
 		await upd.answerCallbackQuery()
 
 		// NAVIGATSIYA TUGMALARINI TEKSHIRISH
@@ -532,17 +579,18 @@ async function askMultiSelect(
 			}
 
 			try {
-				await ctx.api.editMessageText(ctx.chat!.id, sent.message_id, question, {
+				await ctx.api.editMessageText(ctx.chat!.id, currentMessageId, question, {
 					parse_mode: 'Markdown',
 					reply_markup: buildMultiKb(prefix, options, selected, nav)
 				})
-				ctx.session.lastBotMessageId = sent.message_id
-			} catch (error) {
-				console.log('Edit error:', error)
-				await replaceBotMessage(ctx, question, {
+				ctx.session.lastBotMessageId = currentMessageId
+				} catch (error) {
+					logger.warn({ error, userId: ctx.from?.id }, 'Failed to edit multiselect message')
+					const replacement = await replaceBotMessage(ctx, question, {
 					parse_mode: 'Markdown',
 					reply_markup: buildMultiKb(prefix, options, selected, nav)
 				})
+					currentMessageId = replacement.message_id
 			}
 		}
 	}
@@ -564,6 +612,16 @@ async function askFile(
 	while (true) {
 		const upd = await conversation.wait()
 		if (upd.callbackQuery) {
+			const callbackMessageId = getCallbackMessageId(upd)
+			if (
+				ctx.session.lastBotMessageId &&
+				callbackMessageId &&
+				callbackMessageId !== ctx.session.lastBotMessageId
+			) {
+				await upd.answerCallbackQuery().catch(() => undefined)
+				continue
+			}
+
 			await upd.answerCallbackQuery()
 			const data = upd.callbackQuery.data
 			if (!data) continue
@@ -615,18 +673,12 @@ function nextStep(step: StepKey): StepKey {
 		StepKey.SUBMITTED
 	]
 
-	console.log('=== nextStep function ===')
-	console.log('Current step:', step)
-	console.log('Current step index:', order.indexOf(step))
-
 	const i = order.indexOf(step)
 	if (i >= 0 && i < order.length - 1) {
 		const next = order[i + 1]
-		console.log('Next step will be:', next)
 		return next
 	}
 
-	console.log('Next step will be: SUBMITTED')
 	return StepKey.SUBMITTED
 }
 
@@ -737,6 +789,15 @@ export async function applicationFlow(
 					return
 				}
 			}
+				}
+			}
+		} catch (err) {
+			if (isNavSignal(err)) {
+				const signal = err.message as NavSignal
+				if ((await handleNavSignal(ctx, applicationId, signal)) === 'RETURN') {
+					return
+				}
+			}
 
 			logger.error({ err, applicationId, userId: ctx.from?.id }, 'vacancy selection failed')
 			await replaceBotMessage(ctx, "Xatolik yuz berdi. /start bilan qayta urinib ko'ring.")
@@ -777,8 +838,6 @@ export async function applicationFlow(
 						{ back: true, cancel: true, oneTime: true }
 					)
 
-					console.log('Raw input date:', date)
-
 					if (!date || date.trim() === '') {
 						await replaceBotMessage(ctx, "😕 Iltimos, tug'ilgan sanangizni kiriting.", {
 							parse_mode: 'Markdown'
@@ -787,18 +846,12 @@ export async function applicationFlow(
 					}
 
 					ctx.session.temp.answers.birth_date = date
-					console.log('Birth date saved:', date)
-					console.log('Current temp answers:', ctx.session.temp.answers)
-
 					ctx.session.history.push(step)
 					step = nextStep(step)
-					console.log('Next step after birthdate:', step)
 					break
 				}
 
 				case StepKey.PERSON_PHONE: {
-					console.log('=== ENTERING PERSON_PHONE STEP ===')
-
 					const phone = await askPhone(
 						conversation,
 						ctx,
@@ -807,10 +860,7 @@ export async function applicationFlow(
 						{ back: true, cancel: true }
 					)
 
-					console.log('Phone input received:', phone)
-
 					const clean = Validators.sanitizeText(phone)
-					console.log('Sanitized phone:', clean)
 
 					// MVP uchun validatsiyani vaqtincha o'chirish
 					// if (!Validators.validatePhone(clean)) {
@@ -822,17 +872,12 @@ export async function applicationFlow(
 					// }
 
 					ctx.session.temp.answers.phone = clean
-					console.log('Phone saved to temp:', ctx.session.temp.answers.phone)
-
 					ctx.session.history.push(step)
 					step = nextStep(step)
-					console.log('Next step after phone:', step)
 					break
 				}
 
 				case StepKey.PERSON_ADDRESS: {
-					console.log('=== ENTERING PERSON_ADDRESS STEP ===')
-
 					const addr = await askText(
 						conversation,
 						ctx,
@@ -840,15 +885,11 @@ export async function applicationFlow(
 						{ back: true, cancel: true, oneTime: true }
 					)
 
-					console.log('Address input:', addr)
-
 					const clean = Validators.sanitizeText(addr)
-					console.log('Sanitized address:', clean)
 
 					ctx.session.temp.answers.address = clean
 					ctx.session.history.push(step)
 					step = nextStep(step)
-					console.log('Next step after address:', step)
 					break
 				}
 
@@ -1120,8 +1161,6 @@ export async function applicationFlow(
 								columns: 2
 							}
 						)
-						console.log('Has experience selected:', a)
-
 						ctx.session.temp.hasExp = a === 'EXP|YES'
 						ctx.session.temp.answers.exp_has = ctx.session.temp.hasExp ? 'YES' : 'NO'
 						ctx.session.history.push(step)
@@ -1132,7 +1171,6 @@ export async function applicationFlow(
 						// Agar tajriba yo'q bo'lsa, keyingi stepga o'tish
 						ctx.session.history.push(step)
 						step = StepKey.EXP_CAN_WORK_HOW_LONG
-						console.log('No experience, skipping to:', step)
 						break
 					}
 
@@ -1143,12 +1181,9 @@ export async function applicationFlow(
 						"💼 *Oldin qayerda ishlagansiz?*\n\nMasalan: *Klinika / Call-center / Do'kon*",
 						{ back: true, cancel: true, oneTime: true }
 					)
-					console.log('Company input:', company)
-
 					ctx.session.temp.answers.exp_company = Validators.sanitizeText(company)
 					ctx.session.history.push(step)
 					step = nextStep(step)
-					console.log('Next step after company:', step)
 					break
 				}
 
@@ -1338,8 +1373,6 @@ export async function applicationFlow(
 				// }
 
 				case StepKey.FIT_CLIENT_EXP: {
-					console.log('=== ENTERING FIT_CLIENT_EXP STEP ===')
-
 					try {
 						const exp = await askInline(
 							conversation,
@@ -1356,12 +1389,9 @@ export async function applicationFlow(
 							}
 						)
 
-						console.log('Client experience selected:', exp)
-
 						ctx.session.temp.answers.client_experience = exp
 						ctx.session.history.push(step)
 						step = nextStep(step)
-						console.log('Next step after client exp:', step)
 					} catch (error) {
 						// Navigatsiya xatolarini yuqoriga uzatish
 						throw error
