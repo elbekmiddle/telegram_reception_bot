@@ -39,11 +39,20 @@ declare module '@prisma/client' {
     telegramId: bigint
     status: ApplicationStatus
     currentStep: string
+    vacancyId?: string | null
     createdAt: Date
     updatedAt: Date
+    submittedAt?: Date | null
     reviewedAt?: Date | null
     reviewedBy?: bigint | null
     rejectionReason?: string | null
+    answers?: ApplicationAnswer[]
+    files?: ApplicationFile[]
+    vacancy?: any | null
+  }
+
+  export namespace Prisma {
+    export type ApplicationWhereInput = Record<string, any>
   }
 
   export interface ApplicationAnswer {

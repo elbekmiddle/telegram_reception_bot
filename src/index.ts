@@ -4,12 +4,10 @@ import { logger } from './utils/logger'
 
 process.on('uncaughtException', error => {
 	logger.fatal({ error }, 'Uncaught Exception')
-	process.exit(1)
 })
 
 process.on('unhandledRejection', reason => {
 	logger.fatal({ reason }, 'Unhandled Rejection')
-	process.exit(1)
 })
 
 async function main() {
