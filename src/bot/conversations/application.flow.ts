@@ -402,6 +402,16 @@ async function askInline(
 			if (txt === '/cancel') throw navError('CANCEL')
 		}
 
+ 			return data
+		}
+
+		if (upd.message?.text) {
+			const txt = upd.message.text.trim()
+			if (txt === '/start' || txt === '/admin' || txt === '/cancel') {
+				throw navError('CANCEL')
+			}
+		}
+
 		if (upd.message) {
 			await replaceBotMessage(ctx, 'Iltimos, quyidagi tugmalardan birini tanlang 👇', {
 				parse_mode: 'Markdown',
@@ -536,6 +546,10 @@ async function askMultiSelect(
 				parse_mode: 'Markdown',
 				reply_markup: buildMultiKb(prefix, options, selected, nav)
 			})
+			if (txt === '/start' || txt === '/admin' || txt === '/cancel') {
+				throw navError('CANCEL')
+			}
+			await replaceBotMessage(ctx, 'Iltimos, quyidagi tugmalardan foydalaning 👇')
 			continue
 		}
 
@@ -581,6 +595,13 @@ async function askMultiSelect(
 					reply_markup: buildMultiKb(prefix, options, selected, nav)
 				})
 				currentMessageId = replacement.message_id
+				} catch (error) {
+					logger.warn({ error, userId: ctx.from?.id }, 'Failed to edit multiselect message')
+					const replacement = await replaceBotMessage(ctx, question, {
+					parse_mode: 'Markdown',
+					reply_markup: buildMultiKb(prefix, options, selected, nav)
+				})
+					currentMessageId = replacement.message_id
 			}
 		}
 	}
@@ -779,6 +800,24 @@ export async function applicationFlow(
 					return
 				}
 			}
+				}
+			}
+		} catch (err) {
+			if (isNavSignal(err)) {
+				const signal = err.message as NavSignal
+				if ((await handleNavSignal(ctx, applicationId, signal)) === 'RETURN') {
+					return
+				}
+			}
+				}
+			}
+		} catch (err) {
+			if (isNavSignal(err)) {
+				const signal = err.message as NavSignal
+				if ((await handleNavSignal(ctx, applicationId, signal)) === 'RETURN') {
+					return
+				}
+			}
 
 			logger.error({ err, applicationId, userId: ctx.from?.id }, 'vacancy selection failed')
 			await replaceBotMessage(ctx, "Xatolik yuz berdi. /start bilan qayta urinib ko'ring.")
@@ -838,6 +877,7 @@ export async function applicationFlow(
 					}
 
 					ctx.session.temp.answers.birth_date = normalizedBirthDate
+					ctx.session.temp.answers.birth_date = date
 					ctx.session.history.push(step)
 					step = nextStep(step)
 					break
@@ -859,6 +899,15 @@ export async function applicationFlow(
 						})
 						break
 					}
+
+					// MVP uchun validatsiyani vaqtincha o'chirish
+					// if (!Validators.validatePhone(clean)) {
+					// 	console.log('Phone validation failed')
+					// 	await replaceBotMessage(ctx, "😕 Telefon raqam noto'g'ri. Masalan: *+998901234567*", {
+					// 		parse_mode: 'Markdown'
+					// 	})
+					// 	break
+					// }
 
 					ctx.session.temp.answers.phone = clean
 					ctx.session.history.push(step)
