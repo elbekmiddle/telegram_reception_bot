@@ -56,7 +56,7 @@ export function setupCommands(bot: Bot<BotContext>): void {
 			ctx.session.applicationId = undefined
 			ctx.session.currentStep = undefined
 			ctx.session.history = []
-			ctx.session.temp = {}
+			ctx.session.temp = { answers: {} }
 
 			await ctx.reply('❌ Jarayon bekor qilindi. /start bilan qaytadan boshlang.')
 		} catch (err) {

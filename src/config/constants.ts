@@ -83,8 +83,8 @@ export const ComputerSkills = {
 export type ComputerSkill = (typeof ComputerSkills)[keyof typeof ComputerSkills]
 
 export const PhotoRules = {
-	MIN_WIDTH: 600,
-	MIN_HEIGHT: 800,
+	MIN_WIDTH: 400,
+	MIN_HEIGHT: 600,
 	MIN_RATIO: 0.6,
 	MAX_RATIO: 0.9,
 	MAX_WIDTH: 4000, 

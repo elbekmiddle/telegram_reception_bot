@@ -435,67 +435,6 @@ async function askFile(
 	}
 }
 
-async function askSingleSelect(
-	conversation: Conversation<BotContext>,
-	ctx: BotContext,
-	question: string,
-	options: MultiOpt[],
-	nav?: { back?: boolean; cancel?: boolean; skip?: boolean }
-): Promise<string> {
-	const prefix = 'S'
-
-	const kb = new InlineKeyboard()
-	for (const o of options) {
-		kb.text(o.label, `${prefix}|${o.key}`).row()
-	}
-
-	if (nav?.skip) {
-		kb.text('⏭ O‘tkazib yuborish', 'NAV|SKIP')
-		kb.row()
-	}
-	if (nav?.back) {
-		kb.text('⬅️ Orqaga', 'NAV|BACK')
-		kb.row()
-	}
-	if (nav?.cancel) {
-		kb.text('❌ Bekor qilish', 'NAV|CANCEL')
-	}
-
-	await replaceBotMessage(ctx, question, {
-		parse_mode: 'Markdown',
-		reply_markup: kb
-	})
-
-	while (true) {
-		const upd = await conversation.wait()
-
-		if (!upd.callbackQuery) {
-			await replaceBotMessage(ctx, 'Iltimos, quyidagi tugmalardan birini tanlang 👇')
-			continue
-		}
-
-		try {
-			await upd.answerCallbackQuery()
-		} catch (err) {
-			logger.warn(
-				{ err, userId: ctx.from?.id },
-				'Failed to answer callback query in askSingleSelect'
-			)
-		}
-
-		const data = upd.callbackQuery.data
-		if (!data) continue
-
-		if (data === 'NAV|BACK') throw navError('BACK')
-		if (data === 'NAV|CANCEL') throw navError('CANCEL')
-		if (data === 'NAV|SKIP') throw navError('SKIP')
-
-		if (data.startsWith(`${prefix}|`)) {
-			return data.replace(`${prefix}|`, '')
-		}
-	}
-}
-
 function nextStep(step: StepKey): StepKey {
 	const order: StepKey[] = [
 		StepKey.PERSON_FULL_NAME,
@@ -521,7 +460,6 @@ function nextStep(step: StepKey): StepKey {
 		StepKey.WORK_SALARY,
 		StepKey.WORK_START_DATE,
 		StepKey.FILE_PHOTO_HALF_BODY,
-		StepKey.FILE_PASSPORT_OPTIONAL,
 		StepKey.FILE_RECOMMENDATION,
 		StepKey.REVIEW_CONFIRM,
 		StepKey.SUBMITTED
@@ -609,30 +547,54 @@ export async function applicationFlow(
 		return
 	}
 
-	// Vacancy tanlash
+	// Vacancy tanlash + ma'lumot ko'rsatish
 	if (!ctx.session.temp.vacancyPicked) {
 		const vacancies = await vacancyService.listActive()
 		if (vacancies.length > 0) {
-			const buttons = vacancies
-				.slice(0, 12)
-				.map((v: { id: string; title: string }) => ({ text: v.title, data: `VAC|${v.id}` }))
-			const picked = await askInline(
-				conversation,
-				ctx,
-				'📌 *Qaysi vakansiyaga topshirasiz?*',
-				buttons,
-				{ cancel: true, columns: 1 }
-			)
-			if (picked.startsWith('VAC|')) {
+			while (!ctx.session.temp.vacancyPicked) {
+				const buttons = vacancies
+					.slice(0, 12)
+					.map((v: { id: string; title: string }) => ({ text: v.title, data: `VAC|${v.id}` }))
+
+				const picked = await askInline(
+					conversation,
+					ctx,
+					'📌 *Qaysi vakansiyaga topshirasiz?*',
+					buttons,
+					{ cancel: true, columns: 1 }
+				)
+
+				if (!picked.startsWith('VAC|')) continue
 				const vacancyId = picked.replace('VAC|', '')
-				ctx.session.temp.vacancyId = vacancyId
-				await applicationService.setVacancy(applicationId, vacancyId)
+				const vacancy = vacancies.find((v: { id: string }) => v.id === vacancyId)
+				if (!vacancy) continue
+
+				const salaryText =
+					vacancy.salaryFrom && vacancy.salaryTo
+						? `${vacancy.salaryFrom.toLocaleString('ru-RU')} - ${vacancy.salaryTo.toLocaleString('ru-RU')} so'm`
+						: 'Kelishilgan'
+
+				const decision = await askInline(
+					conversation,
+					ctx,
+					`📌 *${vacancy.title}*\n\n📝 ${vacancy.description ?? 'Tavsif mavjud emas'}\n💰 Oylik: *${salaryText}*\n\nAriza topshirasizmi?`,
+					[
+						{ text: '✅ Ishga topshirish', data: 'VAC_APPLY|YES' },
+						{ text: '⬅️ Boshqa vakansiya', data: 'VAC_APPLY|BACK' }
+					],
+					{ cancel: true, columns: 1 }
+				)
+
+				if (decision === 'VAC_APPLY|YES') {
+					ctx.session.temp.vacancyId = vacancyId
+					await applicationService.setVacancy(applicationId, vacancyId)
+					ctx.session.temp.vacancyPicked = true
+				}
 			}
 		}
-		ctx.session.temp.vacancyPicked = true
 	}
 
-	let step: StepKey = ctx.session.currentStep
+	let step: StepKey = ctx.session.currentStep ?? StepKey.PERSON_FULL_NAME
 
 	while (step !== StepKey.SUBMITTED) {
 		try {
@@ -850,7 +812,6 @@ export async function applicationFlow(
 					const eduType = ctx.session.temp.educationType
 
 					if (eduType === 'EDU|SCHOOL') {
-						// Maktab o'quvchilari uchun sertifikat yo'q
 						ctx.session.temp.answers.certificates = []
 						ctx.session.temp.answers.certificates_level = {}
 						ctx.session.history.push(step)
@@ -858,7 +819,6 @@ export async function applicationFlow(
 						break
 					}
 
-					// Sertifikat variantlari
 					const certOptions: MultiOpt[] = [
 						{ key: 'ENGLISH', label: '🇬🇧 Ingliz tili' },
 						{ key: 'ARABIC', label: '🇸🇦 Arab tili' },
@@ -873,31 +833,20 @@ export async function applicationFlow(
 						{ key: 'BIOLOGY', label: '🧬 Biologiya' },
 						{ key: 'HISTORY', label: '📜 Tarix' },
 						{ key: 'LAW', label: '⚖️ Huquq' },
-						{ key: 'OTHER', label: '➕ Boshqa' },
-						{ key: 'NONE', label: "❌ Sertifikatim yo'q" }
+						{ key: 'OTHER', label: '➕ Boshqa' }
 					]
 
-					const languageKeys = [
-						'ENGLISH',
-						'ARABIC',
-						'RUSSIAN',
-						'GERMAN',
-						'KOREAN',
-						'TURKISH',
-						'UZBEK'
-					]
-
-					// Bitta sertifikat tanlash
-					const selected = await askSingleSelect(
+					const languageKeys = ['ENGLISH','ARABIC','RUSSIAN','GERMAN','KOREAN','TURKISH','UZBEK']
+					const selected = await askMultiSelect(
 						conversation,
 						ctx,
-						'📜 *Qaysi til/fandan sertifikatingiz bor?*',
+						'📜 *Qaysi til/fandan sertifikatingiz bor?* (bir nechta tanlashingiz mumkin)',
 						certOptions,
+						new Set<string>(),
 						{ back: true, cancel: true }
 					)
 
-					// Agar "Sertifikatim yo'q" tanlansa
-					if (selected === 'NONE') {
+					if (selected.size === 0) {
 						ctx.session.temp.answers.certificates = []
 						ctx.session.temp.answers.certificates_level = {}
 						ctx.session.history.push(step)
@@ -905,52 +854,38 @@ export async function applicationFlow(
 						break
 					}
 
-					const selectedArray = [selected]
+					const selectedArray = Array.from(selected)
 					const levelsMap: Record<string, string> = {}
-
-					// Agar til sertifikati bo'lsa, darajasini so'rash
-					if (languageKeys.includes(selected)) {
-						const certLabel = certOptions.find(opt => opt.key === selected)?.label || selected
-
-						const levelButtons: InlineBtn[] = [
-							{ text: '🇪🇺 A1', data: 'LVL|A1' },
-							{ text: '🇪🇺 A2', data: 'LVL|A2' },
-							{ text: '🇬🇧 B1', data: 'LVL|B1' },
-							{ text: '🇬🇧 B2', data: 'LVL|B2' },
-							{ text: '🇬🇧 C1', data: 'LVL|C1' },
-							{ text: '🇬🇧 C2', data: 'LVL|C2' },
-							{ text: '🎯 IELTS', data: 'LVL|IELTS' },
-							{ text: '🎯 TOEFL', data: 'LVL|TOEFL' },
-							{ text: '✍️ Boshqa', data: 'LVL|OTHER' }
-						]
-
+					for (const cert of selectedArray) {
+						if (!languageKeys.includes(cert)) {
+							levelsMap[cert] = 'SERTIFIKAT'
+							continue
+						}
+						const certLabel = certOptions.find(opt => opt.key === cert)?.label || cert
 						const picked = await askInline(
 							conversation,
 							ctx,
 							`🏷️ *${certLabel}* darajangiz?`,
-							levelButtons,
+							[
+								{ text: '🇪🇺 A1', data: 'LVL|A1' },
+								{ text: '🇪🇺 A2', data: 'LVL|A2' },
+								{ text: '🇬🇧 B1', data: 'LVL|B1' },
+								{ text: '🇬🇧 B2', data: 'LVL|B2' },
+								{ text: '🇬🇧 C1', data: 'LVL|C1' },
+								{ text: '🇬🇧 C2', data: 'LVL|C2' },
+								{ text: '🎯 IELTS', data: 'LVL|IELTS' },
+								{ text: '🎯 TOEFL', data: 'LVL|TOEFL' },
+								{ text: '✍️ Boshqa', data: 'LVL|OTHER' }
+							],
 							{ back: true, cancel: true, columns: 3 }
 						)
-
-						if (picked === 'LVL|OTHER') {
-							levelsMap[selected] = await askText(
-								conversation,
-								ctx,
-								`✍️ *${certLabel}* darajani yozing (masalan: B2 / IELTS 6.5):`,
-								{ back: true, cancel: true, oneTime: true }
-							)
-						} else {
-							levelsMap[selected] = picked.replace('LVL|', '')
-						}
-					} else {
-						// Fan sertifikatlari uchun
-						levelsMap[selected] = 'SERTIFIKAT'
+						levelsMap[cert] = picked === 'LVL|OTHER'
+							? await askText(conversation, ctx, `✍️ *${certLabel}* darajani yozing (masalan: B2 / IELTS 6.5):`, { back: true, cancel: true, oneTime: true })
+							: picked.replace('LVL|', '')
 					}
 
-					// Vaqtinchalik saqlash
 					ctx.session.temp.answers.certificates = selectedArray
 					ctx.session.temp.answers.certificates_level = levelsMap
-
 					ctx.session.history.push(step)
 					step = nextStep(step)
 					break
@@ -1374,37 +1309,6 @@ export async function applicationFlow(
 						maxRatio: PhotoRules.MAX_RATIO
 					}
 					await PhotoStep.handle(conversation, ctx, rules, applicationId)
-					ctx.session.history.push(step)
-					step = nextStep(step)
-					break
-				}
-
-				case StepKey.FILE_PASSPORT_OPTIONAL: {
-					const want = await askInline(
-						conversation,
-						ctx,
-						'🪪 *Pasport nusxasini yubora olasizmi?* (ixtiyoriy)',
-						[
-							{ text: '✅ Ha, yuboraman', data: 'PASS|YES' },
-							{ text: '⏭ Hozir yo‘q', data: 'PASS|NO' }
-						],
-						{ back: true, cancel: true, columns: 1 }
-					)
-					if (want === 'PASS|YES') {
-						const file = await askFile(
-							conversation,
-							ctx,
-							'📎 *Pasport nusxasini yuboring* (rasm yoki fayl):',
-							true
-						)
-						if (file) {
-							await applicationService.saveFile(
-								applicationId,
-								FileType.PASSPORT,
-								file.telegramFileId
-							)
-						}
-					}
 					ctx.session.history.push(step)
 					step = nextStep(step)
 					break

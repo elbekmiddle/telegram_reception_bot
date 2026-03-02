@@ -5,8 +5,6 @@ import type { BotContext } from '../bot'
 import { logger } from '../../utils/logger'
 import { prisma } from '../../db/prisma'
 
-type VacancyItem = Awaited<ReturnType<typeof prisma.vacancy.findMany>>[number]
-type CourseItem = Awaited<ReturnType<typeof prisma.course.findMany>>[number]
 const COURSE_LEVELS = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2', 'IELTS', 'TOEFL', 'OTHER'] as const
 type CourseLevelValue = (typeof COURSE_LEVELS)[number]
 
@@ -21,41 +19,12 @@ function isAdmin(ctx: BotContext): boolean {
 	return Boolean(id && (id === admin1 || id === admin2))
 }
 
-async function checkForCancel(ctx: BotContext): Promise<boolean> {
-	const message = ctx.message?.text
-	if (message === '/start' || message === '/admin') {
-		await ctx.reply('❌ Amal bekor qilindi.', { parse_mode: 'Markdown' })
-		return true
-	}
-	return false
-}
-
-async function askText(
-	conversation: Conversation<BotContext>,
-	ctx: BotContext,
-	q: string
-): Promise<string | null> {
+async function askText(conversation: Conversation<BotContext>, ctx: BotContext, q: string) {
 	await ctx.reply(q, { parse_mode: 'Markdown' })
-
 	while (true) {
 		const upd = await conversation.wait()
-		const ctx = upd as BotContext
-
-		// Check for cancel commands
-		if (await checkForCancel(ctx)) {
-			return null
-		}
-
-		// Handle back button from inline keyboard
-		if (ctx.callbackQuery?.data === 'CANCEL') {
-			await ctx.answerCallbackQuery()
-			await ctx.reply('⬅️ Ortga qaytildi.', { parse_mode: 'Markdown' })
-			return null
-		}
-
-		const text = ctx.message?.text?.trim()
-		if (text) return text
-
+		if (upd.message?.text?.trim()) return upd.message.text.trim()
+		if (upd.message?.text === '/start' || upd.message?.text === '/admin') return null
 		await ctx.reply('Matn yuboring. Bekor qilish uchun /start yoki /admin bosing.')
 	}
 }
@@ -67,255 +36,190 @@ async function askChoice(
 	btns: { text: string; data: string }[]
 ): Promise<string | null> {
 	const kb = new InlineKeyboard()
-
-	// Tugmalarni 2 tadan qatorlarga ajratamiz
-	for (let i = 0; i < btns.length; i += 2) {
-		kb.text(btns[i].text, btns[i].data)
-		if (i + 1 < btns.length) {
-			kb.text(btns[i + 1].text, btns[i + 1].data)
-		}
-		kb.row()
-	}
-
-	// Orqaga tugmasini alohida qatorga qo'shamiz
-	kb.text('◀️ Orqaga', 'CANCEL').row()
-
-	await ctx.reply(q, { reply_markup: kb, parse_mode: 'Markdown' })
-
+	for (const b of btns) kb.text(b.text, b.data).row()
+	kb.text('◀️ Orqaga', 'CANCEL')
+	await ctx.reply(q, { parse_mode: 'Markdown', reply_markup: kb })
 	while (true) {
 		const upd = await conversation.wait()
-		const ctx = upd as BotContext
-
-		// Check for text commands
-		if (await checkForCancel(ctx)) {
-			return null
-		}
-
-		if (!ctx.callbackQuery?.data) continue
-
-		// Handle cancel button
-		if (ctx.callbackQuery.data === 'CANCEL') {
-			await ctx.answerCallbackQuery()
-			await ctx.reply('⬅️ Ortga qaytildi.', { parse_mode: 'Markdown' })
-			return null
-		}
-
-		await ctx.answerCallbackQuery()
-		return ctx.callbackQuery.data
+		if (upd.message?.text === '/start' || upd.message?.text === '/admin') return null
+		if (!upd.callbackQuery?.data) continue
+		await upd.answerCallbackQuery().catch(() => undefined)
+		if (upd.callbackQuery.data === 'CANCEL') return null
+		return upd.callbackQuery.data
 	}
 }
 
-async function showAdminMenu(
-	conversation: Conversation<BotContext>,
-	ctx: BotContext
-): Promise<string | null> {
-	return await askChoice(conversation, ctx, '*👨‍💼 Admin panel* — amalni tanlang:', [
-		{ text: '📌 Vakansiya qo‘shish', data: 'A|VAC_ADD' },
-		{ text: '🎓 Kurs qo‘shish', data: 'A|COURSE_ADD' },
-		{ text: '📋 Vakansiyalar ro‘yxati', data: 'A|VAC_LIST' },
-		{ text: '📚 Kurslar ro‘yxati', data: 'A|COURSE_LIST' }
-	])
+async function manageCourses(conversation: Conversation<BotContext>, ctx: BotContext): Promise<void> {
+	const items = await prisma.course.findMany({ orderBy: { createdAt: 'desc' }, take: 10 })
+	if (!items.length) {
+		await ctx.reply('📭 *Kurslar yo‘q*', { parse_mode: 'Markdown' })
+		return
+	}
+	const picked = await askChoice(
+		conversation,
+		ctx,
+		'📚 *Kurslar ro‘yxati*\nBirini tanlang:',
+		items.map((c: { id: string; title: string; isActive: boolean }) => ({ text: `${c.isActive ? '✅' : '⛔️'} ${c.title}`, data: `COURSE|${c.id}` }))
+	)
+	if (!picked?.startsWith('COURSE|')) return
+	const id = picked.split('|')[1]
+	const course = await prisma.course.findUnique({ where: { id } })
+	if (!course) return
+
+	const action = await askChoice(
+		conversation,
+		ctx,
+		`🎓 *${course.title}*\n📊 Daraja: *${course.level}*\n📝 ${course.description ?? '-'}\n⚡️ ${course.isActive ? 'Faol' : 'Faol emas'}`,
+		[
+			{ text: '✏️ Edit', data: `COURSE_EDIT|${id}` },
+			{ text: '🗑 O‘chirish', data: `COURSE_DEL|${id}` }
+		]
+	)
+	if (!action) return
+	if (action.startsWith('COURSE_DEL|')) {
+		const conf = await askChoice(conversation, ctx, 'Rostdan ham o‘chirilsinmi?', [
+			{ text: '✅ Ha', data: 'YES' },
+			{ text: '❌ Yo‘q', data: 'NO' }
+		])
+		if (conf === 'YES') {
+			await prisma.course.delete({ where: { id } })
+			await ctx.reply('✅ Kurs o‘chirildi.')
+		}
+		return
+	}
+	if (action.startsWith('COURSE_EDIT|')) {
+		const title = await askText(conversation, ctx, `✏️ Yangi nom (hozirgi: *${course.title}*):`)
+		if (!title) return
+		const description = await askText(conversation, ctx, '📝 Yangi tavsif:')
+		if (!description) return
+		const level = await askChoice(
+			conversation,
+			ctx,
+			'📊 Yangi daraja:',
+			COURSE_LEVELS.map(l => ({ text: l, data: l }))
+		)
+		if (!level || !isCourseLevel(level)) return
+		await prisma.course.update({ where: { id }, data: { title, description, level } })
+		await ctx.reply('✅ Kurs yangilandi.')
+	}
 }
 
-export async function adminFlow(
-	conversation: Conversation<BotContext>,
-	ctx: BotContext
-): Promise<void> {
+async function manageVacancies(conversation: Conversation<BotContext>, ctx: BotContext): Promise<void> {
+	const items = await prisma.vacancy.findMany({ orderBy: { createdAt: 'desc' }, take: 10 })
+	if (!items.length) {
+		await ctx.reply('📭 *Vakansiyalar yo‘q*', { parse_mode: 'Markdown' })
+		return
+	}
+	const picked = await askChoice(
+		conversation,
+		ctx,
+		'📋 *Vakansiyalar ro‘yxati*\nBirini tanlang:',
+		items.map((v: { id: string; title: string; isActive: boolean }) => ({ text: `${v.isActive ? '✅' : '⛔️'} ${v.title}`, data: `VAC|${v.id}` }))
+	)
+	if (!picked?.startsWith('VAC|')) return
+	const id = picked.split('|')[1]
+	const vacancy = await prisma.vacancy.findUnique({ where: { id } })
+	if (!vacancy) return
+
+	const action = await askChoice(
+		conversation,
+		ctx,
+		`📌 *${vacancy.title}*\n📝 ${vacancy.description ?? '-'}\n💰 ${vacancy.salaryFrom ?? 0} - ${vacancy.salaryTo ?? 0}\n⚡️ ${vacancy.isActive ? 'Faol' : 'Faol emas'}`,
+		[
+			{ text: '✏️ Edit', data: `VAC_EDIT|${id}` },
+			{ text: '🗑 O‘chirish', data: `VAC_DEL|${id}` }
+		]
+	)
+	if (!action) return
+	if (action.startsWith('VAC_DEL|')) {
+		const conf = await askChoice(conversation, ctx, 'Rostdan ham o‘chirilsinmi?', [
+			{ text: '✅ Ha', data: 'YES' },
+			{ text: '❌ Yo‘q', data: 'NO' }
+		])
+		if (conf === 'YES') {
+			await prisma.vacancy.delete({ where: { id } })
+			await ctx.reply('✅ Vakansiya o‘chirildi.')
+		}
+		return
+	}
+	if (action.startsWith('VAC_EDIT|')) {
+		const title = await askText(conversation, ctx, `✏️ Yangi nom (hozirgi: *${vacancy.title}*):`)
+		if (!title) return
+		const description = await askText(conversation, ctx, '📝 Yangi tavsif:')
+		if (!description) return
+		const salaryFromStr = await askText(conversation, ctx, '💰 Oylik dan:')
+		const salaryToStr = await askText(conversation, ctx, '💰 Oylik gacha:')
+		if (!salaryFromStr || !salaryToStr) return
+		await prisma.vacancy.update({
+			where: { id },
+			data: {
+				title,
+				description,
+				salaryFrom: Number(salaryFromStr.replace(/\D+/g, '')),
+				salaryTo: Number(salaryToStr.replace(/\D+/g, ''))
+			}
+		})
+		await ctx.reply('✅ Vakansiya yangilandi.')
+	}
+}
+
+export async function adminFlow(conversation: Conversation<BotContext>, ctx: BotContext): Promise<void> {
 	if (!isAdmin(ctx)) {
 		await ctx.reply('⛔️ Ruxsat yo‘q. Siz admin emassiz.')
 		return
 	}
-
 	try {
 		while (true) {
-			// Main menu with back button
-			const action = await showAdminMenu(conversation, ctx)
-
-			// If user cancelled or went back
-			if (!action) {
-				// Admin menuga qaytish o'rniga butunlay chiqish
-				await ctx.reply('✅ Admin panelidan chiqildi. /admin bilan qayta kirishingiz mumkin.', {
-					parse_mode: 'Markdown'
-				})
-				return
-			}
+			const action = await askChoice(conversation, ctx, '*👨‍💼 Admin panel*', [
+				{ text: '📌 Vakansiya qo‘shish', data: 'A|VAC_ADD' },
+				{ text: '🎓 Kurs qo‘shish', data: 'A|COURSE_ADD' },
+				{ text: '📋 Vakansiyalar ro‘yxati', data: 'A|VAC_LIST' },
+				{ text: '📚 Kurslar ro‘yxati', data: 'A|COURSE_LIST' }
+			])
+			if (!action) return
 
 			if (action === 'A|VAC_LIST') {
-				const items = await prisma.vacancy.findMany({
-					orderBy: { createdAt: 'desc' },
-					take: 10
-				})
-
-				if (!items.length) {
-					await ctx.reply(
-						'📭 *Vakansiyalar roʻyxati*\n\nHozircha hech qanday vakansiya mavjud emas.',
-						{ parse_mode: 'Markdown' }
-					)
-					continue
-				}
-
-				let message = '*📋 Vakansiyalar roʻyxati*\n\n'
-				items.forEach((v: VacancyItem, index: number) => {
-					const status = v.isActive ? '✅' : '⛔️'
-					const salary =
-						v.salaryFrom && v.salaryTo
-							? `💰 ${v.salaryFrom.toLocaleString()} - ${v.salaryTo.toLocaleString()} soʻm`
-							: '💰 Kelishilgan'
-					message += `${index + 1}. ${status} *${v.title}*\n`
-					message += `   ${salary}\n`
-					if (v.description) {
-						message += `   📝 ${v.description.substring(0, 50)}${
-							v.description.length > 50 ? '...' : ''
-						}\n`
-					}
-					message += '\n'
-				})
-				message += '_Oxirgi 10 ta vakansiya koʻrsatilgan_'
-
-				await ctx.reply(message, { parse_mode: 'Markdown' })
+				await manageVacancies(conversation, ctx)
 				continue
 			}
-
 			if (action === 'A|COURSE_LIST') {
-				const items = await prisma.course.findMany({
-					orderBy: { createdAt: 'desc' },
-					take: 10
-				})
-
-				if (!items.length) {
-					await ctx.reply('📭 *Kurslar roʻyxati*\n\nHozircha hech qanday kurs mavjud emas.', {
-						parse_mode: 'Markdown'
-					})
-					continue
-				}
-
-				let message = '*📚 Kurslar roʻyxati*\n\n'
-				items.forEach((c: CourseItem, index: number) => {
-					const status = c.isActive ? '✅' : '⛔️'
-					message += `${index + 1}. ${status} *${c.title}*\n`
-					message += `   🎯 Daraja: ${c.level}\n`
-					if (c.description) {
-						message += `   📝 ${c.description.substring(0, 50)}${
-							c.description.length > 50 ? '...' : ''
-						}\n`
-					}
-					message += '\n'
-				})
-				message += '_Oxirgi 10 ta kurs koʻrsatilgan_'
-
-				await ctx.reply(message, { parse_mode: 'Markdown' })
+				await manageCourses(conversation, ctx)
 				continue
 			}
-
 			if (action === 'A|VAC_ADD') {
-				const title = await askText(conversation, ctx, '📌 *Vakansiya nomi* (title):')
-				if (!title) {
-					// User cancelled, but don't show menu again, just continue to next iteration
-					continue
-				}
-
-				const description = await askText(
-					conversation,
-					ctx,
-					'📝 *Vakansiya tavsifi* (description):'
-				)
-				if (!description) continue
-
-				const salaryFromStr = await askText(
-					conversation,
-					ctx,
-					'💰 *Oylik dan* (son). Masalan: `3000000`'
-				)
-				if (!salaryFromStr) continue
-
-				const salaryToStr = await askText(
-					conversation,
-					ctx,
-					'💰 *Oylik gacha* (son). Masalan: `6000000`'
-				)
-				if (!salaryToStr) continue
-
-				const isActiveChoice = await askChoice(conversation, ctx, '⚡️ *Faol qilinsinmi?*', [
-					{ text: '✅ Ha', data: 'YES' },
-					{ text: '⛔️ Yo‘q', data: 'NO' }
-				])
-				if (!isActiveChoice) continue
-
-				const isActive = isActiveChoice === 'YES'
-				const salaryFrom = Number(String(salaryFromStr).replace(/\D+/g, '')) || 0
-				const salaryTo = Number(String(salaryToStr).replace(/\D+/g, '')) || 0
-
-				const v = await prisma.vacancy.create({
+				const title = await askText(conversation, ctx, '📌 *Vakansiya nomi*:')
+				const description = await askText(conversation, ctx, '📝 *Vakansiya tavsifi*:')
+				const salaryFromStr = await askText(conversation, ctx, '💰 *Oylik dan*:')
+				const salaryToStr = await askText(conversation, ctx, '💰 *Oylik gacha*:')
+				if (!title || !description || !salaryFromStr || !salaryToStr) continue
+				await prisma.vacancy.create({
 					data: {
-						title: title.trim(),
-						description: description.trim(),
-						salaryFrom,
-						salaryTo,
-						isActive
+						title,
+						description,
+						salaryFrom: Number(salaryFromStr.replace(/\D+/g, '')),
+						salaryTo: Number(salaryToStr.replace(/\D+/g, '')),
+						isActive: true
 					}
 				})
-
-				await ctx.reply(
-					`✅ *Vakansiya muvaffaqiyatli yaratildi!*\n\n` +
-						`📌 *Nomi:* ${v.title}\n` +
-						`💰 *Maosh:* ${v.salaryFrom?.toLocaleString() || 0} - ${
-							v.salaryTo?.toLocaleString() || 0
-						} soʻm\n` +
-						`⚡️ *Holat:* ${v.isActive ? '✅ Faol' : '⛔️ Faol emas'}`,
-					{ parse_mode: 'Markdown' }
-				)
+				await ctx.reply('✅ Vakansiya yaratildi.')
 				continue
 			}
-
 			if (action === 'A|COURSE_ADD') {
-				const title = await askText(conversation, ctx, '🎓 *Kurs nomi* (title):')
-				if (!title) continue
-
-				const description = await askText(conversation, ctx, '📝 *Kurs tavsifi* (description):')
-				if (!description) continue
-
-				const levelChoice = await askChoice(conversation, ctx, '📊 *Daraja* (level):', [
-					{ text: '🇺🇸 A1', data: 'A1' },
-					{ text: '🇺🇸 A2', data: 'A2' },
-					{ text: '🇬🇧 B1', data: 'B1' },
-					{ text: '🇬🇧 B2', data: 'B2' },
-					{ text: '🇬🇧 C1', data: 'C1' },
-					{ text: '🇬🇧 C2', data: 'C2' },
-					{ text: '🎯 IELTS', data: 'IELTS' },
-					{ text: '🎯 TOEFL', data: 'TOEFL' },
-					{ text: '📚 Boshqa', data: 'OTHER' }
-				])
-				if (!levelChoice || !isCourseLevel(levelChoice)) continue
-
-				const isActiveChoice = await askChoice(conversation, ctx, '⚡️ *Faol qilinsinmi?*', [
-					{ text: '✅ Ha', data: 'YES' },
-					{ text: '⛔️ Yo‘q', data: 'NO' }
-				])
-				if (!isActiveChoice) continue
-
-				const isActive = isActiveChoice === 'YES'
-
-				const c = await prisma.course.create({
-					data: {
-						title: title.trim(),
-						description: description.trim(),
-						level: levelChoice,
-						isActive
-					}
-				})
-
-				await ctx.reply(
-					`✅ *Kurs muvaffaqiyatli yaratildi!*\n\n` +
-						`🎓 *Nomi:* ${c.title}\n` +
-						`📊 *Daraja:* ${c.level}\n` +
-						`⚡️ *Holat:* ${c.isActive ? '✅ Faol' : '⛔️ Faol emas'}`,
-					{ parse_mode: 'Markdown' }
+				const title = await askText(conversation, ctx, '🎓 *Kurs nomi*:')
+				const description = await askText(conversation, ctx, '📝 *Kurs tavsifi*:')
+				const level = await askChoice(
+					conversation,
+					ctx,
+					'📊 *Daraja*:',
+					COURSE_LEVELS.map(l => ({ text: l, data: l }))
 				)
-				continue
+				if (!title || !description || !level || !isCourseLevel(level)) continue
+				await prisma.course.create({ data: { title, description, level, isActive: true } })
+				await ctx.reply('✅ Kurs yaratildi.')
 			}
 		}
 	} catch (err) {
 		logger.error({ err }, 'Admin flow failed')
-		await ctx.reply('❌ Xatolik yuz berdi. Iltimos qaytadan urinib koʻring.')
+		await ctx.reply('❌ Xatolik yuz berdi. Iltimos qaytadan urinib ko‘ring.')
 	}
 }
