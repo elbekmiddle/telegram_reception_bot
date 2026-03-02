@@ -26,7 +26,7 @@ export function setupCallbackHandlers(bot: Bot<BotContext>): void {
 				ctx.session.applicationId = undefined
 				ctx.session.currentStep = StepKey.PERSON_FULL_NAME
 				ctx.session.history = []
-				ctx.session.temp = {}
+				ctx.session.temp = { answers: {} }
 
 				await ctx.conversation.enter('applicationFlow')
 				return

@@ -5,7 +5,7 @@ import { StepKey } from '../../config/constants'
 const initialSessionData = (): SessionData => ({
 	currentStep: StepKey.PERSON_FULL_NAME,
 	history: [],
-	temp: {},
+	temp: { answers: {} },
 	createdAt: Date.now(),
 	lastActivity: Date.now()
 })

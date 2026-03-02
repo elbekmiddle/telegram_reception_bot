@@ -10,18 +10,17 @@ export function setupHandlers(bot: Bot<BotContext>): void {
       
       logger.debug({ data, userId: ctx.from?.id }, 'Callback query received')
       
-      // MUHIM: Callback query ni DARHOL answer qilish
+      // Conversation active bo'lsa, callbackni conversationga yuboramiz
+      const activeConversations = await ctx.conversation.active()
+      if (activeConversations.length > 0) {
+        return next()
+      }
+
+      // Conversation yo'q bo'lsa, callbackni shu joyda yakunlaymiz
       try {
         await ctx.answerCallbackQuery()
       } catch (err) {
         logger.warn({ err, userId: ctx.from?.id }, 'Failed to answer callback query')
-      }
-      
-      // Conversation active bo'lsa, callbackni conversationga yuboramiz
-      const activeConversations = await ctx.conversation.active()
-      if (activeConversations.length > 0) {
-        // Callbackni conversation handle qilishi uchun next() qilamiz
-        return next()
       }
 
       // Agar conversation active bo'lmasa, callbackni o'zimiz handle qilamiz
@@ -36,29 +35,12 @@ export function setupHandlers(bot: Bot<BotContext>): void {
           ctx.session.applicationId = undefined
           ctx.session.currentStep = undefined
           ctx.session.history = []
-          ctx.session.temp = {}
+          ctx.session.temp = { answers: {} }
           await ctx.conversation.enter('applicationFlow')
         }
       }
     } catch (err) {
       logger.error({ err, userId: ctx.from?.id }, 'Callback query handler error')
-    }
-  })
-
-  // Start command
-  bot.command('start', async (ctx) => {
-    try {
-      // Agar conversation active bo'lsa, to'xtatib yangisini boshlaymiz
-      const activeConversations = await ctx.conversation.active()
-      if (activeConversations.length > 0) {
-        await ctx.conversation.exit()
-      }
-      
-      // Application flow ni boshlaymiz
-      await ctx.conversation.enter('applicationFlow')
-    } catch (err) {
-      logger.error({ err, userId: ctx.from?.id }, 'Start command error')
-      await ctx.reply('Xatolik yuz berdi. Qayta urinib ko\'ring.')
     }
   })
 

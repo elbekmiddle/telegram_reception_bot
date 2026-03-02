@@ -25,50 +25,42 @@ export class Validators {
 	// 	return { isValid, parsed: isValid ? parsedDate : undefined }
 	// }
 
-	static validateBirthDate(input: string): { isValid: boolean; date?: Date } {
-		if (!input) return { isValid: false }
+	// Agar kerak bo'lmasa, butun validateBirthDate funksiyasini comment qilish
+	
+static validateBirthDate(input: string): { isValid: boolean; date?: Date } {
+	if (!input) return { isValid: false }
 
-		const match = input.match(/^(\d{2})\.(\d{2})\.(\d{4})$/)
-		if (!match) return { isValid: false }
+	const match = input.match(/^(\d{2})\.(\d{2})\.(\d{4})$/)
+	if (!match) return { isValid: false }
 
-		const day = Number(match[1])
-		const month = Number(match[2])
-		const year = Number(match[3])
+	const day = Number(match[1])
+	const month = Number(match[2])
+	const year = Number(match[3])
 
-		// Basic range check
-		if (year < 1900 || year > new Date().getFullYear()) {
-			return { isValid: false }
-		}
-
-		if (month < 1 || month > 12) {
-			return { isValid: false }
-		}
-
-		const date = new Date(year, month - 1, day)
-
-		// Real date check (masalan 31.02.2000 ni ushlaydi)
-		if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) {
-			return { isValid: false }
-		}
-
-		const now = new Date()
-		if (date > now) {
-			return { isValid: false }
-		}
-
-		// 16 yoshdan kichik bo‘lmasin (aniq kun/oy hisobida)
-		let age = now.getFullYear() - year
-		const monthDiff = now.getMonth() - (month - 1)
-		if (monthDiff < 0 || (monthDiff === 0 && now.getDate() < day)) {
-			age -= 1
-		}
-
-		if (age < 16) {
-			return { isValid: false }
-		}
-
-		return { isValid: true, date }
+	// Basic range check
+	if (year < 1900 || year > new Date().getFullYear()) {
+		return { isValid: false }
 	}
+
+	if (month < 1 || month > 12) {
+		return { isValid: false }
+	}
+
+	const date = new Date(year, month - 1, day)
+
+	// Real date check (masalan 31.02.2000 ni ushlaydi)
+	if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) {
+		return { isValid: false }
+	}
+
+	const now = new Date()
+	if (date > now) {
+		return { isValid: false }
+	}
+
+	return { isValid: true, date }
+}
+
 
 	static validatePhone(phone: string): boolean {
 		// +998 XX XXX-XX-XX format
@@ -90,11 +82,24 @@ export class Validators {
 	static sanitizeText(text: string): string {
 		return text.trim().replace(/\s+/g, ' ')
 	}
+	// utils/validators.ts
 	static normalizeBirthDate(input: string): string {
-		return String(input)
-			.trim()
-			.replace(/\s+/g, '')
-			.replace(/[\/\-]/g, '.')
-			.replace(/[^0-9.]/g, '')
+		if (!input) return ''
+
+		// Trim va bo'shliqlarni olib tashlash
+		const trimmed = String(input).trim()
+
+		// Faqat raqam va nuqta qoldirish, boshqa hamma narsani olib tashlash
+		const normalized = trimmed
+			.replace(/\s+/g, '') // bo'shliqlarni olib tashlash
+			.replace(/[\/\-_]/g, '.') // / - _ larni . ga almashtirish
+			.replace(/[^0-9.]/g, '') // faqat raqam va nuqta qoldirish
+
+		// Agar natija bo'sh bo'lsa, asl qiymatni qaytarish (validatsiya uchun)
+		if (!normalized) {
+			return trimmed
+		}
+
+		return normalized
 	}
 }
