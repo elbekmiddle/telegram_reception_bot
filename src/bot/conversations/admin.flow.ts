@@ -163,6 +163,118 @@ async function manageVacancies(conversation: Conversation<BotContext>, ctx: BotC
 	}
 }
 
+async function manageApplications(conversation: Conversation<BotContext>, ctx: BotContext): Promise<void> {
+	const vacancies = await prisma.vacancy.findMany({
+		where: { isActive: true },
+		orderBy: { createdAt: 'desc' }
+	})
+
+	if (!vacancies.length) {
+		await ctx.reply('📭 *Faol vakansiyalar topilmadi*', { parse_mode: 'Markdown' })
+		return
+	}
+
+	const pickedVacancy = await askChoice(
+		conversation,
+		ctx,
+		'📨 *Qaysi vakansiya arizalarini ko‘rasiz?*',
+		vacancies.map((v: { id: string; title: string }) => ({ text: v.title, data: `APP_VAC|${v.id}` }))
+	)
+
+	if (!pickedVacancy?.startsWith('APP_VAC|')) return
+	const vacancyId = pickedVacancy.split('|')[1]
+
+	const applications = await prisma.application.findMany({
+		where: { vacancyId, status: 'SUBMITTED' },
+		include: {
+			answers: true,
+			files: true,
+			vacancy: true
+		},
+		orderBy: { submittedAt: 'desc' },
+		take: 20
+	})
+
+	if (!applications.length) {
+		await ctx.reply('📭 Bu vakansiya uchun yuborilgan arizalar yo‘q.')
+		return
+	}
+
+	const pickedApp = await askChoice(
+		conversation,
+		ctx,
+		'📋 *Arizalar ro‘yxati*',
+		applications.map((app: { id: string; answers: Array<{ fieldKey: string; fieldValue: string }> }) => {
+			const fullName = app.answers.find((a: { fieldKey: string }) => a.fieldKey === 'full_name')?.fieldValue ?? 'Nomaʼlum'
+			return { text: `${fullName} (#${app.id.slice(0, 8)})`, data: `APP_VIEW|${app.id}` }
+		})
+	)
+
+	if (!pickedApp?.startsWith('APP_VIEW|')) return
+	const applicationId = pickedApp.split('|')[1]
+	const application = applications.find((a: { id: string }) => a.id === applicationId)
+	if (!application) return
+
+	const map = new Map(application.answers.map((a: { fieldKey: string; fieldValue: string }) => [a.fieldKey, a.fieldValue]))
+	const photo = application.files.find((f: { type: string }) => f.type === 'HALF_BODY')
+
+	const text = [
+		`📌 *Vakansiya:* ${application.vacancy?.title ?? '-'}`,
+		'',
+		'📌 *1. Shaxsiy maʼlumotlar*',
+		`👤 ${map.get('full_name') ?? '-'}`,
+		`📅 ${map.get('birth_date') ?? '-'}`,
+		`📍 ${map.get('address') ?? '-'}`,
+		`📞 ${map.get('phone') ?? '-'}`,
+		`💍 ${map.get('marital_status') ?? '-'}`,
+		'',
+		'🎓 *2. Taʼlim*',
+		`🏫 ${map.get('education_type') ?? '-'}`,
+		`📚 ${map.get('speciality') ?? '-'}`,
+		`📜 ${map.get('certificates') ?? '-'}`,
+		'',
+		'💼 *3. Tajriba*',
+		`🏢 ${map.get('exp_company') ?? '-'}`,
+		`⏳ ${map.get('exp_duration') ?? '-'}`,
+		`👔 ${map.get('exp_position') ?? '-'}`,
+		`❓ ${map.get('exp_leave_reason') ?? '-'}`,
+		`🕒 ${map.get('exp_can_work_how_long') ?? '-'}`,
+		`💻 ${map.get('computer_skills') ?? '-'}`,
+		'',
+		'🧍‍♀️ *4. Moslik*',
+		`🗣️ ${map.get('communication_skill') ?? '-'}`,
+		`📞 ${map.get('can_answer_calls') ?? '-'}`,
+		`🤝 ${map.get('client_experience') ?? '-'}`,
+		`👔 ${map.get('dress_code') ?? '-'}`,
+		`💪 ${map.get('stress_tolerance') ?? '-'}`,
+		'',
+		'⏰ *5. Ish sharoiti*',
+		`🕐 ${map.get('work_shift') ?? '-'}`,
+		`💰 ${map.get('expected_salary') ?? '-'}`,
+		`🚀 ${map.get('start_date') ?? '-'}`,
+		'',
+		`🔗 *Rasm:* ${photo?.cloudinaryUrl ?? 'Mavjud emas'}`
+	].join('\n')
+
+	const kb = new InlineKeyboard()
+		.text('✅ Qabul qilish', `AD|APPROVE|${application.id}`)
+		.text('❌ Rad etish', `AD|REJECT|${application.id}`)
+
+	if (photo?.cloudinaryUrl) {
+		await ctx.replyWithPhoto(photo.cloudinaryUrl, {
+			caption: text,
+			parse_mode: 'Markdown',
+			reply_markup: kb
+		})
+		return
+	}
+
+	await ctx.reply(text, {
+		parse_mode: 'Markdown',
+		reply_markup: kb
+	})
+}
+
 export async function adminFlow(conversation: Conversation<BotContext>, ctx: BotContext): Promise<void> {
 	if (!isAdmin(ctx)) {
 		await ctx.reply('⛔️ Ruxsat yo‘q. Siz admin emassiz.')
@@ -174,7 +286,8 @@ export async function adminFlow(conversation: Conversation<BotContext>, ctx: Bot
 				{ text: '📌 Vakansiya qo‘shish', data: 'A|VAC_ADD' },
 				{ text: '🎓 Kurs qo‘shish', data: 'A|COURSE_ADD' },
 				{ text: '📋 Vakansiyalar ro‘yxati', data: 'A|VAC_LIST' },
-				{ text: '📚 Kurslar ro‘yxati', data: 'A|COURSE_LIST' }
+				{ text: '📚 Kurslar ro‘yxati', data: 'A|COURSE_LIST' },
+				{ text: '📨 Arizalar (vakansiya bo‘yicha)', data: 'A|APP_LIST' }
 			])
 			if (!action) return
 
@@ -184,6 +297,10 @@ export async function adminFlow(conversation: Conversation<BotContext>, ctx: Bot
 			}
 			if (action === 'A|COURSE_LIST') {
 				await manageCourses(conversation, ctx)
+				continue
+			}
+			if (action === 'A|APP_LIST') {
+				await manageApplications(conversation, ctx)
 				continue
 			}
 			if (action === 'A|VAC_ADD') {
