@@ -9,6 +9,7 @@ import { authMiddleware } from './middlewares/auth'
 import { rateLimitMiddleware } from './middlewares/rateLimit'
 import { setupCommands } from './commands'
 import { setupHandlers } from './handlers'
+import { setupAdminHandlers } from './handlers/admin'
 import { applicationFlow } from './conversations/application.flow'
 import { adminFlow } from './conversations/admin.flow'
 import type { SessionData } from '../types/session'
@@ -59,6 +60,7 @@ bot.use(authMiddleware)
 // Commands va handlers eng oxirida
 setupCommands(bot)
 setupHandlers(bot)
+setupAdminHandlers(bot)
 
 bot.catch(err => {
 	logger.error({ err }, 'Unhandled bot error')

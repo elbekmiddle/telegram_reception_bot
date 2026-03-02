@@ -129,7 +129,7 @@ function buildInlineKb(
 	}
 
 	// Agar tugmalar soni cols ga karrali bo'lmasa, oxirgi qatorni tugatish
-	if (buttons.length % cols !== 0 || buttons.length > 0) {
+	if (buttons.length % cols !== 0 || buttons.length === 0) {
 		kb.row()
 	}
 
@@ -288,8 +288,7 @@ async function askInline(
 	buttons: InlineBtn[],
 	opts?: { back?: boolean; cancel?: boolean; skip?: boolean; columns?: number }
 ): Promise<string> {
-	// Xabarni yuborish
-	const sentMsg = await replaceBotMessage(ctx, question, {
+	await replaceBotMessage(ctx, question, {
 		parse_mode: 'Markdown',
 		reply_markup: buildInlineKb(buttons, opts)
 	})
@@ -305,31 +304,24 @@ async function askInline(
 			// Callback query ni answer qilish
 			try {
 				await upd.answerCallbackQuery()
-				console.log('✅ Callback answered:', data)
 			} catch (err) {
 				logger.warn({ err, userId: ctx.from?.id }, 'Failed to answer callback query in askInline')
 			}
 
 			// NAVIGATSIYA TUGMALARINI TEKSHIRISH
-			if (data === 'NAV|BACK') {
-				console.log('⬅️ BACK navigation triggered')
-				throw navError('BACK')
-			}
-			if (data === 'NAV|CANCEL') {
-				console.log('❌ CANCEL navigation triggered')
-				throw navError('CANCEL')
-			}
-			if (data === 'NAV|SKIP') {
-				console.log('⏭ SKIP navigation triggered')
-				throw navError('SKIP')
-			}
-
-			// Tanlangan variantni qaytarish
-			console.log('✅ Option selected:', data)
+			if (data === 'NAV|BACK') throw navError('BACK')
+			if (data === 'NAV|CANCEL') throw navError('CANCEL')
+			if (data === 'NAV|SKIP') throw navError('SKIP')
 			return data
 		}
 
-		// Agar callback query bo'lmasa, xabarni qayta yuborish
+		if (upd.message?.text) {
+			const txt = upd.message.text.trim()
+			if (txt === '/start' || txt === '/admin' || txt === '/cancel') {
+				throw navError('CANCEL')
+			}
+		}
+
 		if (upd.message) {
 			await replaceBotMessage(ctx, 'Iltimos, quyidagi tugmalardan birini tanlang 👇', {
 				parse_mode: 'Markdown',
@@ -444,6 +436,10 @@ async function askMultiSelect(
 		const upd = await conversation.wait()
 
 		if (!upd.callbackQuery) {
+			const txt = upd.message?.text?.trim()
+			if (txt === '/start' || txt === '/admin' || txt === '/cancel') {
+				throw navError('CANCEL')
+			}
 			await replaceBotMessage(ctx, 'Iltimos, quyidagi tugmalardan foydalaning 👇')
 			continue
 		}
@@ -451,33 +447,20 @@ async function askMultiSelect(
 		const data = upd.callbackQuery.data
 		if (!data) continue
 
-		// Callback query ni answer qilish
 		await upd.answerCallbackQuery()
-		console.log('MultiSelect callback:', data)
 
 		// NAVIGATSIYA TUGMALARINI TEKSHIRISH
-		if (data === 'NAV|BACK') {
-			console.log('⬅️ BACK navigation triggered')
-			throw navError('BACK')
-		}
-		if (data === 'NAV|CANCEL') {
-			console.log('❌ CANCEL navigation triggered')
-			throw navError('CANCEL')
-		}
-		if (data === `${prefix}|DONE`) {
-			console.log('✅ DONE selected')
-			return selected
-		}
+		if (data === 'NAV|BACK') throw navError('BACK')
+		if (data === 'NAV|CANCEL') throw navError('CANCEL')
+		if (data === `${prefix}|DONE`) return selected
 
 		const parts = data.split('|')
 		if (parts.length === 3 && parts[0] === prefix && parts[1] === 'T') {
 			const key = parts[2]
 			if (selected.has(key)) {
 				selected.delete(key)
-				console.log('Removed:', key)
 			} else {
 				selected.add(key)
-				console.log('Added:', key)
 			}
 
 			try {
@@ -1586,8 +1569,8 @@ export async function applicationFlow(
 
 						const adminSummary = await buildAdminSummary(applicationId)
 						const adminKb = new InlineKeyboard()
-							.text('✅ Qabul qilish', `ADMIN|APPROVE|${applicationId}`)
-							.text('❌ Bekor qilish', `ADMIN|REJECT|${applicationId}`)
+							.text('✅ Qabul qilish', `AD|APPROVE|${applicationId}`)
+							.text('❌ Bekor qilish', `AD|REJECT|${applicationId}`)
 
 						await ctx.api.sendMessage(
 							Number(process.env.ADMIN_CHAT_ID),
