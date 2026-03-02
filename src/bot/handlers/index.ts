@@ -17,14 +17,14 @@ export function setupHandlers(bot: Bot<BotContext>): void {
       }
 
       // Conversation yo'q bo'lsa, callbackni shu joyda yakunlaymiz
-      try {
-        await ctx.answerCallbackQuery()
-      } catch (err) {
-        logger.warn({ err, userId: ctx.from?.id }, 'Failed to answer callback query')
-      }
-
-      // Agar conversation active bo'lmasa, callbackni o'zimiz handle qilamiz
+      // Agar conversation active bo'lmasa, faqat NAV callbackni shu joyda handle qilamiz
       if (data.startsWith('NAV|')) {
+        try {
+          await ctx.answerCallbackQuery()
+        } catch (err) {
+          logger.warn({ err, userId: ctx.from?.id }, 'Failed to answer callback query')
+        }
+
         // Navigation callbacklar
         if (data === 'NAV|RESUME') {
           await ctx.conversation.enter('applicationFlow')
@@ -38,9 +38,14 @@ export function setupHandlers(bot: Bot<BotContext>): void {
           ctx.session.temp = { answers: {} }
           await ctx.conversation.enter('applicationFlow')
         }
+
+        return
       }
+
+      return next()
     } catch (err) {
       logger.error({ err, userId: ctx.from?.id }, 'Callback query handler error')
+      return next()
     }
   })
 
