@@ -5,6 +5,14 @@ import type { BotContext } from '../bot'
 import { logger } from '../../utils/logger'
 import { prisma } from '../../db/prisma'
 
+type AdminNavSignal = 'START' | 'ADMIN'
+
+const adminNavError = (sig: AdminNavSignal) => new Error(sig)
+
+function isAdminNavSignal(err: unknown): err is Error {
+	return err instanceof Error && (err.message === 'START' || err.message === 'ADMIN')
+}
+
 const COURSE_LEVELS = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2', 'IELTS', 'TOEFL', 'OTHER'] as const
 type CourseLevelValue = (typeof COURSE_LEVELS)[number]
 
@@ -23,8 +31,10 @@ async function askText(conversation: Conversation<BotContext>, ctx: BotContext, 
 	await ctx.reply(q, { parse_mode: 'Markdown' })
 	while (true) {
 		const upd = await conversation.wait()
-		if (upd.message?.text?.trim()) return upd.message.text.trim()
-		if (upd.message?.text === '/start' || upd.message?.text === '/admin') return null
+		const text = upd.message?.text?.trim()
+		if (text === '/start') throw adminNavError('START')
+		if (text === '/admin') throw adminNavError('ADMIN')
+		if (text) return text
 		await ctx.reply('Matn yuboring. Bekor qilish uchun /start yoki /admin bosing.')
 	}
 }
@@ -41,7 +51,9 @@ async function askChoice(
 	await ctx.reply(q, { parse_mode: 'Markdown', reply_markup: kb })
 	while (true) {
 		const upd = await conversation.wait()
-		if (upd.message?.text === '/start' || upd.message?.text === '/admin') return null
+		const text = upd.message?.text?.trim()
+		if (text === '/start') throw adminNavError('START')
+		if (text === '/admin') throw adminNavError('ADMIN')
 		if (!upd.callbackQuery?.data) continue
 		await upd.answerCallbackQuery().catch(() => undefined)
 		if (upd.callbackQuery.data === 'CANCEL') return null
@@ -336,6 +348,21 @@ export async function adminFlow(conversation: Conversation<BotContext>, ctx: Bot
 			}
 		}
 	} catch (err) {
+		if (isAdminNavSignal(err)) {
+			if (err.message === 'START') {
+				await ctx.conversation.exit()
+				await ctx.conversation.enter('applicationFlow')
+				return
+			}
+
+			if (err.message === 'ADMIN') {
+				await ctx.reply('👨‍💼 Siz allaqachon admin panelsiz.')
+				await ctx.conversation.exit()
+				await ctx.conversation.enter('adminFlow')
+				return
+			}
+		}
+
 		logger.error({ err }, 'Admin flow failed')
 		await ctx.reply('❌ Xatolik yuz berdi. Iltimos qaytadan urinib ko‘ring.')
 	}
