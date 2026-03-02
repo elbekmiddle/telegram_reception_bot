@@ -376,6 +376,17 @@ async function askInline(
 			if (txt === '/cancel') throw navError('CANCEL')
 		}
 
+ 			return data
+		}
+
+		if (upd.message?.text) {
+			const txt = upd.message.text.trim()
+			if (txt === '/start' || txt === '/admin' || txt === '/cancel') {
+				throw navError('CANCEL')
+			}
+		}
+
+ main
 		if (upd.message) {
 			await replaceBotMessage(ctx, 'Iltimos, quyidagi tugmalardan birini tanlang 👇', {
 				parse_mode: 'Markdown',
@@ -494,6 +505,9 @@ async function askMultiSelect(
 			if (txt === '/start') throw navError('START')
 			if (txt === '/admin') throw navError('ADMIN')
 			if (txt === '/cancel') throw navError('CANCEL')
+			if (txt === '/start' || txt === '/admin' || txt === '/cancel') {
+				throw navError('CANCEL')
+			}
 			await replaceBotMessage(ctx, 'Iltimos, quyidagi tugmalardan foydalaning 👇')
 			continue
 		}
