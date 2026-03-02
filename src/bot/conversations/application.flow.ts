@@ -13,13 +13,13 @@ import { keyboards } from '../../utils/keyboards'
 import { logger } from '../../utils/logger'
 import { SessionData } from '../../types/session'
 
-type NavSignal = 'BACK' | 'CANCEL' | 'SKIP'
+type NavSignal = 'BACK' | 'CANCEL' | 'SKIP' | 'START' | 'ADMIN'
 const navError = (sig: NavSignal) => new Error(sig)
 
 function isNavSignal(err: unknown): err is Error {
 	return (
 		err instanceof Error &&
-		(err.message === 'BACK' || err.message === 'CANCEL' || err.message === 'SKIP')
+		['BACK', 'CANCEL', 'SKIP', 'START', 'ADMIN'].includes(err.message)
 	)
 }
 
@@ -52,6 +52,59 @@ function getFieldType(key: string): AnswerFieldType {
 function popOrFirst(history: StepKey[], fallback: StepKey): StepKey {
 	const next = history.pop()
 	return next ?? fallback
+}
+
+function getCallbackMessageId(upd: Awaited<ReturnType<Conversation<BotContext>['wait']>>): number | null {
+	const msg = upd.callbackQuery?.message
+	if (!msg || !('message_id' in msg)) return null
+	return msg.message_id
+}
+
+async function handleNavSignal(
+	ctx: BotContext,
+	applicationId: string,
+	signal: NavSignal
+): Promise<'CONTINUE' | 'RETURN'> {
+	if (signal === 'CANCEL') {
+		await applicationService.cancelApplication(applicationId)
+		ctx.session.applicationId = undefined
+		ctx.session.currentStep = StepKey.PERSON_FULL_NAME
+		ctx.session.history = []
+		ctx.session.temp = {} as SessionData['temp']
+		ctx.session.lastBotMessageId = undefined
+		await replaceBotMessage(
+			ctx,
+			'❌ *Anketa bekor qilindi.*\n\nQaytadan boshlash uchun /start bosing.',
+			{ parse_mode: 'Markdown' }
+		)
+		return 'RETURN'
+	}
+
+	if (signal === 'START') {
+		await applicationService.cancelApplication(applicationId)
+		ctx.session.applicationId = undefined
+		ctx.session.currentStep = StepKey.PERSON_FULL_NAME
+		ctx.session.history = []
+		ctx.session.temp = { answers: {} }
+		ctx.session.lastBotMessageId = undefined
+		await ctx.conversation.exit()
+		await ctx.conversation.enter('applicationFlow')
+		return 'RETURN'
+	}
+
+	if (signal === 'ADMIN') {
+		await applicationService.cancelApplication(applicationId)
+		ctx.session.applicationId = undefined
+		ctx.session.currentStep = StepKey.PERSON_FULL_NAME
+		ctx.session.history = []
+		ctx.session.temp = { answers: {} }
+		ctx.session.lastBotMessageId = undefined
+		await ctx.conversation.exit()
+		await ctx.conversation.enter('adminFlow')
+		return 'RETURN'
+	}
+
+	return 'CONTINUE'
 }
 
 async function deletePrevBotMessage(ctx: BotContext) {
@@ -129,7 +182,7 @@ function buildInlineKb(
 	}
 
 	// Agar tugmalar soni cols ga karrali bo'lmasa, oxirgi qatorni tugatish
-	if (buttons.length % cols !== 0 || buttons.length > 0) {
+	if (buttons.length % cols !== 0 || buttons.length === 0) {
 		kb.row()
 	}
 
@@ -205,6 +258,16 @@ async function askPhone(
 		const upd = await conversation.wait()
 
 		if (upd.callbackQuery) {
+			const callbackMessageId = getCallbackMessageId(upd)
+			if (
+				ctx.session.lastBotMessageId &&
+				callbackMessageId &&
+				callbackMessageId !== ctx.session.lastBotMessageId
+			) {
+				await upd.answerCallbackQuery().catch(() => undefined)
+				continue
+			}
+
 			const data = upd.callbackQuery.data
 			if (!data) continue
 
@@ -225,9 +288,9 @@ async function askPhone(
 
 		const text = upd.message?.text?.trim()
 		if (text) {
-			if (text === '/start' || text === '/admin' || text === '/cancel') {
-				throw navError('CANCEL')
-			}
+			if (text === '/start') throw navError('START')
+			if (text === '/admin') throw navError('ADMIN')
+			if (text === '/cancel') throw navError('CANCEL')
 
 			if (text === '⬅️ Orqaga') throw navError('BACK')
 			if (text === '❌ Bekor qilish') throw navError('CANCEL')
@@ -288,8 +351,9 @@ async function askInline(
 	buttons: InlineBtn[],
 	opts?: { back?: boolean; cancel?: boolean; skip?: boolean; columns?: number }
 ): Promise<string> {
-	// Xabarni yuborish
-	const sentMsg = await replaceBotMessage(ctx, question, {
+	const allowedData = new Set(buttons.map(b => b.data))
+
+	await replaceBotMessage(ctx, question, {
 		parse_mode: 'Markdown',
 		reply_markup: buildInlineKb(buttons, opts)
 	})
@@ -299,37 +363,45 @@ async function askInline(
 
 		// Callback query kelganligini tekshirish
 		if (upd.callbackQuery) {
+			const callbackMessageId = getCallbackMessageId(upd)
+			if (
+				ctx.session.lastBotMessageId &&
+				callbackMessageId &&
+				callbackMessageId !== ctx.session.lastBotMessageId
+			) {
+				await upd.answerCallbackQuery().catch(() => undefined)
+				continue
+			}
+
 			const data = upd.callbackQuery.data
 			if (!data) continue
 
 			// Callback query ni answer qilish
 			try {
 				await upd.answerCallbackQuery()
-				console.log('✅ Callback answered:', data)
 			} catch (err) {
 				logger.warn({ err, userId: ctx.from?.id }, 'Failed to answer callback query in askInline')
 			}
 
 			// NAVIGATSIYA TUGMALARINI TEKSHIRISH
-			if (data === 'NAV|BACK') {
-				console.log('⬅️ BACK navigation triggered')
-				throw navError('BACK')
-			}
-			if (data === 'NAV|CANCEL') {
-				console.log('❌ CANCEL navigation triggered')
-				throw navError('CANCEL')
-			}
-			if (data === 'NAV|SKIP') {
-				console.log('⏭ SKIP navigation triggered')
-				throw navError('SKIP')
+			if (data === 'NAV|BACK') throw navError('BACK')
+			if (data === 'NAV|CANCEL') throw navError('CANCEL')
+			if (data === 'NAV|SKIP') throw navError('SKIP')
+
+			if (!allowedData.has(data)) {
+				continue
 			}
 
-			// Tanlangan variantni qaytarish
-			console.log('✅ Option selected:', data)
 			return data
 		}
 
-		// Agar callback query bo'lmasa, xabarni qayta yuborish
+		if (upd.message?.text) {
+			const txt = upd.message.text.trim()
+			if (txt === '/start') throw navError('START')
+			if (txt === '/admin') throw navError('ADMIN')
+			if (txt === '/cancel') throw navError('CANCEL')
+		}
+
 		if (upd.message) {
 			await replaceBotMessage(ctx, 'Iltimos, quyidagi tugmalardan birini tanlang 👇', {
 				parse_mode: 'Markdown',
@@ -384,6 +456,16 @@ async function askText(
 		const upd = await conversation.wait()
 
 		if (upd.callbackQuery) {
+			const callbackMessageId = getCallbackMessageId(upd)
+			if (
+				ctx.session.lastBotMessageId &&
+				callbackMessageId &&
+				callbackMessageId !== ctx.session.lastBotMessageId
+			) {
+				await upd.answerCallbackQuery().catch(() => undefined)
+				continue
+			}
+
 			const data = upd.callbackQuery.data
 			if (!data) continue
 
@@ -410,9 +492,9 @@ async function askText(
 
 		const text = upd.message?.text?.trim()
 		if (text) {
-			if (text === '/start' || text === '/admin' || text === '/cancel') {
-				throw navError('CANCEL')
-			}
+			if (text === '/start') throw navError('START')
+			if (text === '/admin') throw navError('ADMIN')
+			if (text === '/cancel') throw navError('CANCEL')
 
 			if (text === '⬅️ Orqaga') throw navError('BACK')
 			if (text === '❌ Bekor qilish') throw navError('CANCEL')
@@ -434,64 +516,71 @@ async function askMultiSelect(
 ): Promise<Set<string>> {
 	const prefix = 'M'
 	const selected = new Set<string>(initial)
+	let currentMessageId: number
 
 	const sent = await replaceBotMessage(ctx, question, {
 		parse_mode: 'Markdown',
 		reply_markup: buildMultiKb(prefix, options, selected, nav)
 	})
+	currentMessageId = sent.message_id
 
 	while (true) {
 		const upd = await conversation.wait()
 
 		if (!upd.callbackQuery) {
-			await replaceBotMessage(ctx, 'Iltimos, quyidagi tugmalardan foydalaning 👇')
+			const txt = upd.message?.text?.trim()
+			if (txt === '/start') throw navError('START')
+			if (txt === '/admin') throw navError('ADMIN')
+			if (txt === '/cancel') throw navError('CANCEL')
+			await replaceBotMessage(ctx, question, {
+				parse_mode: 'Markdown',
+				reply_markup: buildMultiKb(prefix, options, selected, nav)
+			})
 			continue
 		}
 
 		const data = upd.callbackQuery.data
 		if (!data) continue
 
-		// Callback query ni answer qilish
+		const callbackMessageId = getCallbackMessageId(upd)
+		if (
+			ctx.session.lastBotMessageId &&
+			callbackMessageId &&
+			callbackMessageId !== ctx.session.lastBotMessageId
+		) {
+			await upd.answerCallbackQuery().catch(() => undefined)
+			continue
+		}
+
 		await upd.answerCallbackQuery()
-		console.log('MultiSelect callback:', data)
 
 		// NAVIGATSIYA TUGMALARINI TEKSHIRISH
-		if (data === 'NAV|BACK') {
-			console.log('⬅️ BACK navigation triggered')
-			throw navError('BACK')
-		}
-		if (data === 'NAV|CANCEL') {
-			console.log('❌ CANCEL navigation triggered')
-			throw navError('CANCEL')
-		}
-		if (data === `${prefix}|DONE`) {
-			console.log('✅ DONE selected')
-			return selected
-		}
+		if (data === 'NAV|BACK') throw navError('BACK')
+		if (data === 'NAV|CANCEL') throw navError('CANCEL')
+		if (data === `${prefix}|DONE`) return selected
 
 		const parts = data.split('|')
 		if (parts.length === 3 && parts[0] === prefix && parts[1] === 'T') {
 			const key = parts[2]
 			if (selected.has(key)) {
 				selected.delete(key)
-				console.log('Removed:', key)
 			} else {
 				selected.add(key)
-				console.log('Added:', key)
 			}
 
 			try {
-				await ctx.api.editMessageText(ctx.chat!.id, sent.message_id, question, {
+				await ctx.api.editMessageText(ctx.chat!.id, currentMessageId, question, {
 					parse_mode: 'Markdown',
 					reply_markup: buildMultiKb(prefix, options, selected, nav)
 				})
-				ctx.session.lastBotMessageId = sent.message_id
+				ctx.session.lastBotMessageId = currentMessageId
 			} catch (error) {
-				console.log('Edit error:', error)
-				await replaceBotMessage(ctx, question, {
+				logger.warn({ error, userId: ctx.from?.id }, 'Failed to edit multiselect message')
+				const replacement = await replaceBotMessage(ctx, question, {
 					parse_mode: 'Markdown',
 					reply_markup: buildMultiKb(prefix, options, selected, nav)
 				})
+				currentMessageId = replacement.message_id
 			}
 		}
 	}
@@ -513,6 +602,16 @@ async function askFile(
 	while (true) {
 		const upd = await conversation.wait()
 		if (upd.callbackQuery) {
+			const callbackMessageId = getCallbackMessageId(upd)
+			if (
+				ctx.session.lastBotMessageId &&
+				callbackMessageId &&
+				callbackMessageId !== ctx.session.lastBotMessageId
+			) {
+				await upd.answerCallbackQuery().catch(() => undefined)
+				continue
+			}
+
 			await upd.answerCallbackQuery()
 			const data = upd.callbackQuery.data
 			if (!data) continue
@@ -564,18 +663,12 @@ function nextStep(step: StepKey): StepKey {
 		StepKey.SUBMITTED
 	]
 
-	console.log('=== nextStep function ===')
-	console.log('Current step:', step)
-	console.log('Current step index:', order.indexOf(step))
-
 	const i = order.indexOf(step)
 	if (i >= 0 && i < order.length - 1) {
 		const next = order[i + 1]
-		console.log('Next step will be:', next)
 		return next
 	}
 
-	console.log('Next step will be: SUBMITTED')
 	return StepKey.SUBMITTED
 }
 
@@ -626,17 +719,15 @@ export async function applicationFlow(
 	}
 
 	if (!ctx.session.temp.vacancyPicked) {
-		const vacancies = await vacancyService.listActive()
-		console.log('Vacancies from DB:', vacancies)
+		try {
+			const vacancies = await vacancyService.listActive()
 
-		if (vacancies.length > 0) {
-			while (!ctx.session.temp.vacancyPicked) {
-				const buttons = vacancies.slice(0, 12).map((v: { id: string; title: string }) => ({
-					text: v.title,
-					data: `VAC|${v.id}`
-				}))
-
-				console.log('Sending vacancy selection with buttons:', buttons)
+			if (vacancies.length > 0) {
+				while (!ctx.session.temp.vacancyPicked) {
+					const buttons = vacancies.slice(0, 12).map((v: { id: string; title: string }) => ({
+						text: v.title,
+						data: `VAC|${v.id}`
+					}))
 
 				const picked = await askInline(
 					conversation,
@@ -646,12 +737,9 @@ export async function applicationFlow(
 					{ cancel: true, columns: 1 }
 				)
 
-				console.log('User picked:', picked)
-
-				if (!picked || !picked.startsWith('VAC|')) {
-					console.log('Invalid pick, continuing...')
-					continue
-				}
+					if (!picked || !picked.startsWith('VAC|')) {
+						continue
+					}
 
 				const vacancyId = picked.replace('VAC|', '')
 				const vacancy = vacancies.find((v: { id: string }) => v.id === vacancyId)
@@ -677,15 +765,24 @@ export async function applicationFlow(
 					{ cancel: true, columns: 1 }
 				)
 
-				console.log('Decision:', decision)
-
-				if (decision === 'VAC_APPLY|YES') {
-					ctx.session.temp.vacancyId = vacancyId
-					await applicationService.setVacancy(applicationId, vacancyId)
-					ctx.session.temp.vacancyPicked = true
-					console.log('Vacancy picked successfully!')
+					if (decision === 'VAC_APPLY|YES') {
+						ctx.session.temp.vacancyId = vacancyId
+						await applicationService.setVacancy(applicationId, vacancyId)
+						ctx.session.temp.vacancyPicked = true
+					}
 				}
 			}
+		} catch (err) {
+			if (isNavSignal(err)) {
+				const signal = err.message as NavSignal
+				if ((await handleNavSignal(ctx, applicationId, signal)) === 'RETURN') {
+					return
+				}
+			}
+
+			logger.error({ err, applicationId, userId: ctx.from?.id }, 'vacancy selection failed')
+			await replaceBotMessage(ctx, "Xatolik yuz berdi. /start bilan qayta urinib ko'ring.")
+			return
 		}
 	}
 
@@ -722,8 +819,6 @@ export async function applicationFlow(
 						{ back: true, cancel: true, oneTime: true }
 					)
 
-					console.log('Raw input date:', date)
-
 					if (!date || date.trim() === '') {
 						await replaceBotMessage(ctx, "😕 Iltimos, tug'ilgan sanangizni kiriting.", {
 							parse_mode: 'Markdown'
@@ -731,19 +826,24 @@ export async function applicationFlow(
 						break
 					}
 
-					ctx.session.temp.answers.birth_date = date
-					console.log('Birth date saved:', date)
-					console.log('Current temp answers:', ctx.session.temp.answers)
+					const normalizedBirthDate = Validators.normalizeBirthDate(date)
+					const birthDateValidation = Validators.validateBirthDate(normalizedBirthDate)
+					if (!birthDateValidation.isValid) {
+						await replaceBotMessage(
+							ctx,
+							"😕 Tug'ilgan sana noto'g'ri. Masalan: *12.03.2003* formatida kiriting.",
+							{ parse_mode: 'Markdown' }
+						)
+						break
+					}
 
+					ctx.session.temp.answers.birth_date = normalizedBirthDate
 					ctx.session.history.push(step)
 					step = nextStep(step)
-					console.log('Next step after birthdate:', step)
 					break
 				}
 
 				case StepKey.PERSON_PHONE: {
-					console.log('=== ENTERING PERSON_PHONE STEP ===')
-
 					const phone = await askPhone(
 						conversation,
 						ctx,
@@ -752,32 +852,21 @@ export async function applicationFlow(
 						{ back: true, cancel: true }
 					)
 
-					console.log('Phone input received:', phone)
-
 					const clean = Validators.sanitizeText(phone)
-					console.log('Sanitized phone:', clean)
-
-					// MVP uchun validatsiyani vaqtincha o'chirish
-					// if (!Validators.validatePhone(clean)) {
-					// 	console.log('Phone validation failed')
-					// 	await replaceBotMessage(ctx, "😕 Telefon raqam noto'g'ri. Masalan: *+998901234567*", {
-					// 		parse_mode: 'Markdown'
-					// 	})
-					// 	break
-					// }
+					if (!Validators.validatePhone(clean)) {
+						await replaceBotMessage(ctx, "😕 Telefon raqam noto'g'ri. Masalan: *+998901234567*", {
+							parse_mode: 'Markdown'
+						})
+						break
+					}
 
 					ctx.session.temp.answers.phone = clean
-					console.log('Phone saved to temp:', ctx.session.temp.answers.phone)
-
 					ctx.session.history.push(step)
 					step = nextStep(step)
-					console.log('Next step after phone:', step)
 					break
 				}
 
 				case StepKey.PERSON_ADDRESS: {
-					console.log('=== ENTERING PERSON_ADDRESS STEP ===')
-
 					const addr = await askText(
 						conversation,
 						ctx,
@@ -785,15 +874,11 @@ export async function applicationFlow(
 						{ back: true, cancel: true, oneTime: true }
 					)
 
-					console.log('Address input:', addr)
-
 					const clean = Validators.sanitizeText(addr)
-					console.log('Sanitized address:', clean)
 
 					ctx.session.temp.answers.address = clean
 					ctx.session.history.push(step)
 					step = nextStep(step)
-					console.log('Next step after address:', step)
 					break
 				}
 
@@ -1065,8 +1150,6 @@ export async function applicationFlow(
 								columns: 2
 							}
 						)
-						console.log('Has experience selected:', a)
-
 						ctx.session.temp.hasExp = a === 'EXP|YES'
 						ctx.session.temp.answers.exp_has = ctx.session.temp.hasExp ? 'YES' : 'NO'
 						ctx.session.history.push(step)
@@ -1077,7 +1160,6 @@ export async function applicationFlow(
 						// Agar tajriba yo'q bo'lsa, keyingi stepga o'tish
 						ctx.session.history.push(step)
 						step = StepKey.EXP_CAN_WORK_HOW_LONG
-						console.log('No experience, skipping to:', step)
 						break
 					}
 
@@ -1088,12 +1170,9 @@ export async function applicationFlow(
 						"💼 *Oldin qayerda ishlagansiz?*\n\nMasalan: *Klinika / Call-center / Do'kon*",
 						{ back: true, cancel: true, oneTime: true }
 					)
-					console.log('Company input:', company)
-
 					ctx.session.temp.answers.exp_company = Validators.sanitizeText(company)
 					ctx.session.history.push(step)
 					step = nextStep(step)
-					console.log('Next step after company:', step)
 					break
 				}
 
@@ -1283,8 +1362,6 @@ export async function applicationFlow(
 				// }
 
 				case StepKey.FIT_CLIENT_EXP: {
-					console.log('=== ENTERING FIT_CLIENT_EXP STEP ===')
-
 					try {
 						const exp = await askInline(
 							conversation,
@@ -1301,12 +1378,9 @@ export async function applicationFlow(
 							}
 						)
 
-						console.log('Client experience selected:', exp)
-
 						ctx.session.temp.answers.client_experience = exp
 						ctx.session.history.push(step)
 						step = nextStep(step)
-						console.log('Next step after client exp:', step)
 					} catch (error) {
 						// Navigatsiya xatolarini yuqoriga uzatish
 						throw error
@@ -1586,8 +1660,8 @@ export async function applicationFlow(
 
 						const adminSummary = await buildAdminSummary(applicationId)
 						const adminKb = new InlineKeyboard()
-							.text('✅ Qabul qilish', `ADMIN|APPROVE|${applicationId}`)
-							.text('❌ Bekor qilish', `ADMIN|REJECT|${applicationId}`)
+							.text('✅ Qabul qilish', `AD|APPROVE|${applicationId}`)
+							.text('❌ Bekor qilish', `AD|REJECT|${applicationId}`)
 
 						await ctx.api.sendMessage(
 							Number(process.env.ADMIN_CHAT_ID),
@@ -1617,19 +1691,14 @@ export async function applicationFlow(
 			if (isNavSignal(err)) {
 				const signal = err.message as NavSignal
 
+				if (signal === 'START' || signal === 'ADMIN') {
+					if ((await handleNavSignal(ctx, applicationId, signal)) === 'RETURN') {
+						return
+					}
+				}
+
 				if (signal === 'CANCEL') {
-					await applicationService.cancelApplication(applicationId)
-					ctx.session.applicationId = undefined
-					ctx.session.currentStep = StepKey.PERSON_FULL_NAME
-					ctx.session.history = []
-					ctx.session.temp = {} as SessionData['temp']
-					ctx.session.lastBotMessageId = undefined
-					await replaceBotMessage(
-						ctx,
-						'❌ *Anketa bekor qilindi.*\n\nQaytadan boshlash uchun /start bosing.',
-						{ parse_mode: 'Markdown' }
-					)
-					return
+					if ((await handleNavSignal(ctx, applicationId, signal)) === 'RETURN') return
 				}
 
 				if (signal === 'BACK') {
