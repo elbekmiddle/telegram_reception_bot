@@ -1,6 +1,7 @@
 import { Bot, Context as GrammyContext, type MiddlewareFn } from 'grammy'
 import { conversations, createConversation, type ConversationFlavor } from '@grammyjs/conversations'
 import { type SessionFlavor } from 'grammy'
+import express, { Request, Response } from "express"
 
 import { env } from '../config/env'
 import { logger } from '../utils/logger'
@@ -9,6 +10,7 @@ import { authMiddleware } from './middlewares/auth'
 import { rateLimitMiddleware } from './middlewares/rateLimit'
 import { setupCommands } from './commands'
 import { setupHandlers } from './handlers'
+import { setupAdminHandlers } from './handlers/admin'
 import { applicationFlow } from './conversations/application.flow'
 import { adminFlow } from './conversations/admin.flow'
 import type { SessionData } from '../types/session'
@@ -18,7 +20,6 @@ type BotState = {
 	applicationId?: string
 	inProgress?: boolean
 }
-
 
 export type BotContext = GrammyContext &
 	SessionFlavor<SessionData> &
@@ -59,19 +60,128 @@ bot.use(authMiddleware)
 // Commands va handlers eng oxirida
 setupCommands(bot)
 setupHandlers(bot)
+setupAdminHandlers(bot)
 
 bot.catch(err => {
 	logger.error({ err }, 'Unhandled bot error')
 })
 
-export async function startBot(): Promise<void> {
-	await bot.start({
-		onStart: info => {
-			logger.info(
-				env.NODE_ENV === 'development'
-					? `✅ Bot started (polling): @${info.username}`
-					: `✅ Bot started (polling/prod): @${info.username}`
-			)
+// Health check server
+const app = express()
+const PORT = process.env.PORT || '4000'
+
+// Health check endpoint
+app.get('/health', (_req: Request, res: Response) => {
+	const healthcheck = {
+		status: 'OK',
+		timestamp: new Date().toISOString(),
+		uptime: process.uptime(),
+		bot: {
+			status: 'running',
+			username: bot.botInfo?.username || 'unknown',
+			id: bot.botInfo?.id || 'unknown'
+		},
+		environment: env.NODE_ENV,
+		version: process.version,
+		memory: process.memoryUsage()
+	}
+
+	try {
+		res.status(200).json(healthcheck)
+	} catch (error) {
+		healthcheck.status = 'ERROR'
+		res.status(503).json(healthcheck)
+	}
+})
+
+// Readiness check endpoint
+app.get('/ready', (_req: Request, res: Response) => {
+	res.status(200).json({
+		status: 'READY',
+		timestamp: new Date().toISOString(),
+		bot: {
+			status: 'ready',
+			username: bot.botInfo?.username || null
 		}
 	})
+})
+
+// Liveness check endpoint
+app.get('/live', (_req: Request, res: Response) => {
+	res.status(200).json({
+		status: 'ALIVE',
+		timestamp: new Date().toISOString()
+	})
+})
+
+// Metrics endpoint (opsiyonel)
+app.get('/metrics', (_req: Request, res: Response) => {
+	res.status(200).json({
+		uptime: process.uptime(),
+		memoryUsage: process.memoryUsage(),
+		cpuUsage: process.cpuUsage(),
+		botStats: {
+			startTime: new Date(Date.now() - process.uptime() * 1000).toISOString(),
+			botUsername: bot.botInfo?.username,
+			botId: bot.botInfo?.id
+		}
+	})
+})
+
+// Root endpoint
+app.get('/', (_req: Request, res: Response) => {
+	res.status(200).json({
+		message: 'Telegram Reception Bot API',
+		version: '1.0.0',
+		endpoints: {
+			health: '/health',
+			ready: '/ready',
+			live: '/live',
+			metrics: '/metrics'
+		},
+		bot: {
+			username: bot.botInfo?.username,
+			status: 'running'
+		}
+	})
+})
+
+export async function startBot(): Promise<void> {
+	try {
+		// Health serverini ishga tushirish
+		app.listen(PORT, () => {
+			logger.info(`✅ Health server running on port ${PORT}`)
+			logger.info(`   Health endpoint: http://localhost:${PORT}/health`)
+			logger.info(`   Ready endpoint: http://localhost:${PORT}/ready`)
+			logger.info(`   Live endpoint: http://localhost:${PORT}/live`)
+			logger.info(`   Metrics endpoint: http://localhost:${PORT}/metrics`)
+		})
+
+		// Botni ishga tushirish
+		await bot.start({
+			onStart: info => {
+				logger.info(
+					env.NODE_ENV === 'development'
+						? `✅ Bot started (polling): @${info.username}`
+						: `✅ Bot started (polling/prod): @${info.username}`
+				)
+			}
+		})
+	} catch (error) {
+		logger.error({ error }, 'Failed to start bot')
+		process.exit(1)
+	}
 }
+
+// Graceful shutdown
+process.on('SIGTERM', async () => {
+	logger.info('SIGTERM received, shutting down gracefully...')
+	await bot.stop()
+	process.exit(0)
+})
+
+process.on('SIGINT', async () => {
+	logger.info('SIGINT received, shutting down gracefully...')
+	await bot.stop()
+	process.exit(0)
+})
