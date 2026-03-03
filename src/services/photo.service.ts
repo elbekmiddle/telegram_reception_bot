@@ -41,7 +41,7 @@ export class PhotoService {
 	async validateTelegramPhoto(
 		ctx: BotContext,
 		telegramFileId: string,
-		rules: HalfBodyPhotoRules
+		_rules: HalfBodyPhotoRules
 	): Promise<PhotoValidationResult> {
 		try {
 			const file = await ctx.api.getFile(telegramFileId)
@@ -57,25 +57,8 @@ export class PhotoService {
 			const width = meta.width ?? 0
 			const height = meta.height ?? 0
 
-			// Minimal o'lcham tekshiruvi (agar juda kichik bo'lsa)
-			if (width < rules.minWidth || height < rules.minHeight) {
-				return {
-					ok: false,
-					reason: `Rasm sifati past. Minimal o'lcham ${rules.minWidth}x${rules.minHeight} bo'lishi kerak. Hozirgi: ${width}x${height}`
-				}
-			}
-
-			// Maksimal o'lcham tekshiruvi (agar juda katta bo'lsa - 4K dan katta)
-			const MAX_WIDTH = 4000
-			const MAX_HEIGHT = 4000
-			if (width > MAX_WIDTH || height > MAX_HEIGHT) {
-				return {
-					ok: false,
-					reason: `Rasm juda katta. Maksimal o'lcham ${MAX_WIDTH}x${MAX_HEIGHT} bo'lishi kerak. Hozirgi: ${width}x${height}`
-				}
-			}
-
-			// Portret format tekshiruvi (bo'yi enidan katta bo'lishi kerak)
+			
+			// Faqat tik formatni tekshiramiz
 			if (height <= width) {
 				return {
 					ok: false,
@@ -84,18 +67,16 @@ export class PhotoService {
 				}
 			}
 
-			// Nisbat tekshiruvi (half body uchun taxminan 0.6 - 0.9 oralig'i)
-			const ratio = width / height
-			if (ratio < rules.minRatio || ratio > rules.maxRatio) {
+			const ratio = height === 0 ? 0 : width / height
+			const faceLikely = await this.hasLikelyFace(buffer, width, height)
+			if (!faceLikely) {
 				return {
 					ok: false,
-					reason: `Rasm nisbatlari mos emas. Belidan yuqori (tik) rasm yuboring. Optimal nisbat 0.7-0.85 atrofida. Hozirgi: ${ratio.toFixed(
-						2
-					)}`
+					reason: "Rasmda yuz aniq ko'rinmadi. Iltimos, yuzingiz ravshan ko'ringan rasm yuboring."
 				}
 			}
 
-			// Rasmda yuz bor-yo'qligini tekshirish (oddiy tekshiruv)
+// Rasmda yuz bor-yo'qligini tekshirish (oddiy tekshiruv)
 			// Bu yerda face detection qo'shish mumkin, lekin hozircha o'tkazib yuboramiz
 
 			return { ok: true, width, height, ratio, buffer }
@@ -103,6 +84,30 @@ export class PhotoService {
 			logger.error({ err }, 'Photo validation failed')
 			return { ok: false, reason: "Rasmni tekshirishda xatolik. Qayta urinib ko'ring." }
 		}
+	}
+
+	private async hasLikelyFace(buffer: Buffer, width: number, height: number): Promise<boolean> {
+		const region = await sharp(buffer)
+			.extract({
+				left: Math.max(0, Math.floor(width * 0.25)),
+				top: Math.max(0, Math.floor(height * 0.05)),
+				width: Math.max(1, Math.floor(width * 0.5)),
+				height: Math.max(1, Math.floor(height * 0.45))
+			})
+			.resize(80, 80)
+			.raw()
+			.toBuffer({ resolveWithObject: true })
+
+		const data = region.data
+		let skinLike = 0
+		for (let i = 0; i < data.length; i += 3) {
+			const r = data[i]
+			const g = data[i + 1]
+			const b = data[i + 2]
+			if (r > 90 && g > 40 && b > 20 && r > g && g > b) skinLike += 1
+		}
+		const pixels = data.length / 3
+		return pixels > 0 && skinLike / pixels > 0.08
 	}
 
 	async uploadBufferToCloudinary(buffer: Buffer): Promise<{ secureUrl: string; publicId: string }> {

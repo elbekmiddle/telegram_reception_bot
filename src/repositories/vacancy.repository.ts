@@ -5,6 +5,7 @@ export type CreateVacancyDTO = {
 	title: string
 	description?: string | null
 	isActive?: boolean
+	questions?: unknown
 }
 
 export class VacancyRepository {
@@ -15,13 +16,18 @@ export class VacancyRepository {
 		})
 	}
 
+	async getById(id: string) {
+		return prisma.vacancy.findUnique({ where: { id } })
+	}
+
 	async create(data: CreateVacancyDTO) {
 		try {
 			return await prisma.vacancy.create({
 				data: {
 					title: data.title,
 					description: data.description ?? null,
-					isActive: data.isActive ?? true
+					isActive: data.isActive ?? true,
+					questions: data.questions ?? []
 				}
 			})
 		} catch (error) {

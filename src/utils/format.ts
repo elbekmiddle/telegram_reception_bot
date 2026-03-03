@@ -261,6 +261,11 @@ export async function buildAdminSummary(applicationId: string): Promise<string> 
 		}
 	}
 
+	const vacancyAnswers = Array.from(answerMap.entries())
+		.filter(([key]) => key.startsWith('vacancy_q_'))
+		.sort(([a], [b]) => a.localeCompare(b))
+		.map(([, value], idx) => `• Savol ${idx + 1}: ${value}`)
+
 	// Kompyuter ko'nikmalarini qisqacha formatlash
 	const skills = answerMap.get('computer_skills')
 	let skillsDisplay = '—'
@@ -297,6 +302,8 @@ export async function buildAdminSummary(applicationId: string): Promise<string> 
 
 💻 *Ko'nikmalar:*
 • Kompyuter: ${skillsDisplay}
+
+${vacancyAnswers.length ? `📌 *Vakansiya savollari:*\n${vacancyAnswers.join('\n')}\n` : ''}
 
 💰 *Kutmalar:*
 • Ish vaqti: ${formatWorkShift(answerMap.get('work_shift') || '—')}

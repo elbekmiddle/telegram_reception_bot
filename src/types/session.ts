@@ -9,6 +9,7 @@ export interface SessionData {
 		answers: Record<string, any> // Barcha javoblar shu yerda to'planadi
 		vacancyPicked?: boolean
 		vacancyId?: string
+		vacancyQuestionsAsked?: boolean
 		educationType?: string
 		hasExp?: boolean
 		workShift?: string

@@ -136,7 +136,7 @@ async function manageVacancies(conversation: Conversation<BotContext>, ctx: BotC
 	const action = await askChoice(
 		conversation,
 		ctx,
-		`📌 *${vacancy.title}*\n📝 ${vacancy.description ?? '-'}\n💰 ${vacancy.salaryFrom ?? 0} - ${vacancy.salaryTo ?? 0}\n⚡️ ${vacancy.isActive ? 'Faol' : 'Faol emas'}`,
+		`📌 *${vacancy.title}*\n📝 ${vacancy.description ?? '-'}\n💰 ${vacancy.salaryFrom ? `${vacancy.salaryFrom} so'mdan` : 'Kelishilgan'}\n⚡️ ${vacancy.isActive ? 'Faol' : 'Faol emas'}`,
 		[
 			{ text: '✏️ Edit', data: `VAC_EDIT|${id}` },
 			{ text: '🗑 O‘chirish', data: `VAC_DEL|${id}` }
@@ -159,16 +159,24 @@ async function manageVacancies(conversation: Conversation<BotContext>, ctx: BotC
 		if (!title) return
 		const description = await askText(conversation, ctx, '📝 Yangi tavsif:')
 		if (!description) return
-		const salaryFromStr = await askText(conversation, ctx, '💰 Oylik dan:')
-		const salaryToStr = await askText(conversation, ctx, '💰 Oylik gacha:')
-		if (!salaryFromStr || !salaryToStr) return
+		const salaryFromStr = await askText(conversation, ctx, "💰 Oylik (kamida):")
+		const qText = await askText(
+			conversation,
+			ctx,
+			"❓ Vakansiya uchun qo'shimcha savollarni kiriting (har qatorga bitta savol, ixtiyoriy)."
+		)
+		if (!salaryFromStr) return
 		await prisma.vacancy.update({
 			where: { id },
 			data: {
 				title,
 				description,
-				salaryFrom: Number(salaryFromStr.replace(/\D+/g, '')),
-				salaryTo: Number(salaryToStr.replace(/\D+/g, ''))
+				salaryFrom: Number(salaryFromStr.replace(/\D+/g, '')) || null,
+				salaryTo: null,
+				questions: qText
+					.split('\n')
+					.map(q => q.trim())
+					.filter(Boolean)
 			}
 		})
 		await ctx.reply('✅ Vakansiya yangilandi.')
@@ -227,8 +235,13 @@ async function manageApplications(conversation: Conversation<BotContext>, ctx: B
 	const application = applications.find((a: { id: string }) => a.id === applicationId)
 	if (!application) return
 
-	const map = new Map(application.answers.map((a: { fieldKey: string; fieldValue: string }) => [a.fieldKey, a.fieldValue]))
+	const map = new Map<string, string>(application.answers.map((a: { fieldKey: string; fieldValue: string }) => [a.fieldKey, a.fieldValue]))
 	const photo = application.files.find((f: { type: string }) => f.type === 'HALF_BODY')
+
+	const customAnswers = Array.from(map.entries())
+		.filter(([key]) => key.startsWith('vacancy_q_'))
+		.sort(([a], [b]) => a.localeCompare(b))
+		.map(([, value], idx) => `• Savol ${idx + 1}: ${value}`)
 
 	const text = [
 		`📌 *Vakansiya:* ${application.vacancy?.title ?? '-'}`,
@@ -264,6 +277,9 @@ async function manageApplications(conversation: Conversation<BotContext>, ctx: B
 		`🕐 ${map.get('work_shift') ?? '-'}`,
 		`💰 ${map.get('expected_salary') ?? '-'}`,
 		`🚀 ${map.get('start_date') ?? '-'}`,
+		'',
+		customAnswers.length ? '📌 *Vakansiya savollari:*' : '',
+		...customAnswers,
 		'',
 		`🔗 *Rasm:* ${photo?.cloudinaryUrl ?? 'Mavjud emas'}`
 	].join('\n')
@@ -318,15 +334,23 @@ export async function adminFlow(conversation: Conversation<BotContext>, ctx: Bot
 			if (action === 'A|VAC_ADD') {
 				const title = await askText(conversation, ctx, '📌 *Vakansiya nomi*:')
 				const description = await askText(conversation, ctx, '📝 *Vakansiya tavsifi*:')
-				const salaryFromStr = await askText(conversation, ctx, '💰 *Oylik dan*:')
-				const salaryToStr = await askText(conversation, ctx, '💰 *Oylik gacha*:')
-				if (!title || !description || !salaryFromStr || !salaryToStr) continue
+				const salaryFromStr = await askText(conversation, ctx, "💰 *Oylik (kamida)*:")
+				const qText = await askText(
+					conversation,
+					ctx,
+					"❓ *Vakansiya savollari* (har qatorga bitta savol, ixtiyoriy):"
+				)
+				if (!title || !description || !salaryFromStr) continue
 				await prisma.vacancy.create({
 					data: {
 						title,
 						description,
-						salaryFrom: Number(salaryFromStr.replace(/\D+/g, '')),
-						salaryTo: Number(salaryToStr.replace(/\D+/g, '')),
+						salaryFrom: Number(salaryFromStr.replace(/\D+/g, '')) || null,
+						salaryTo: null,
+						questions: qText
+							.split('\n')
+							.map(q => q.trim())
+							.filter(Boolean),
 						isActive: true
 					}
 				})

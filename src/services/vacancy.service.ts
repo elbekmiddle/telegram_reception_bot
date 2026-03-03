@@ -8,6 +8,11 @@ export class VacancyService {
 	create(title: string, description?: string | null) {
 		return vacancyRepo.create({ title, description })
 	}
+
+	getById(id: string) {
+		return vacancyRepo.getById(id)
+	}
 }
+
 
 export const vacancyService = new VacancyService()

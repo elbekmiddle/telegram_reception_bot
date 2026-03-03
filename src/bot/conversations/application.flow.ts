@@ -76,7 +76,7 @@ async function handleNavSignal(
 		ctx.session.applicationId = undefined
 		ctx.session.currentStep = StepKey.PERSON_FULL_NAME
 		ctx.session.history = []
-		ctx.session.temp = { answers: {} }
+		ctx.session.temp = { answers: {}, vacancyQuestionsAsked: false }
 		ctx.session.lastBotMessageId = undefined
 		await ctx.conversation.exit()
 		await ctx.conversation.enter('applicationFlow')
@@ -88,7 +88,7 @@ async function handleNavSignal(
 		ctx.session.applicationId = undefined
 		ctx.session.currentStep = StepKey.PERSON_FULL_NAME
 		ctx.session.history = []
-		ctx.session.temp = { answers: {} }
+		ctx.session.temp = { answers: {}, vacancyQuestionsAsked: false }
 		ctx.session.lastBotMessageId = undefined
 		await ctx.conversation.exit()
 		await ctx.conversation.enter('adminFlow')
@@ -573,6 +573,32 @@ async function askFile(
 	}
 }
 
+
+type VacancyQuestion = {
+	label: string
+	key: string
+}
+
+function parseVacancyQuestions(raw: unknown): VacancyQuestion[] {
+	if (!Array.isArray(raw)) return []
+	return raw
+		.map((q, i) => {
+			if (typeof q === 'string') {
+				const label = q.trim()
+				if (!label) return null
+				return { label, key: `vacancy_q_${i + 1}` }
+			}
+			if (q && typeof q === 'object') {
+				const label = typeof (q as { label?: unknown }).label === 'string' ? (q as { label: string }).label.trim() : ''
+				if (!label) return null
+				const key = typeof (q as { key?: unknown }).key === 'string' ? (q as { key: string }).key : `vacancy_q_${i + 1}`
+				return { label, key }
+			}
+			return null
+		})
+		.filter((q): q is VacancyQuestion => q !== null)
+}
+
 function nextStep(step: StepKey): StepKey {
 	const order: StepKey[] = [
 		StepKey.PERSON_FULL_NAME,
@@ -632,7 +658,8 @@ export async function applicationFlow(
 		ctx.session.currentStep = StepKey.PERSON_FULL_NAME
 		ctx.session.history = []
 		ctx.session.temp = {
-			answers: {}
+			answers: {},
+			vacancyQuestionsAsked: false
 		}
 		ctx.session.createdAt = Date.now()
 		ctx.session.lastActivity = Date.now()
@@ -684,12 +711,9 @@ export async function applicationFlow(
 					const vacancy = vacancies.find((v: { id: string }) => v.id === vacancyId)
 					if (!vacancy) continue
 
-					const salaryText =
-						vacancy.salaryFrom && vacancy.salaryTo
-							? `${vacancy.salaryFrom.toLocaleString('ru-RU')} - ${vacancy.salaryTo.toLocaleString(
-									'ru-RU'
-							  )} so'm`
-							: 'Kelishilgan'
+					const salaryText = vacancy.salaryFrom
+						? `${vacancy.salaryFrom.toLocaleString('ru-RU')} so'mdan`
+						: 'Kelishilgan'
 
 					const decision = await askInline(
 						conversation,
@@ -724,6 +748,34 @@ export async function applicationFlow(
 			return
 		}
 	}
+
+
+	if (!ctx.session.temp.vacancyQuestionsAsked && ctx.session.temp.vacancyId) {
+		try {
+			const pickedVacancy = await vacancyService.getById(ctx.session.temp.vacancyId)
+			const questions = parseVacancyQuestions(pickedVacancy?.questions)
+			for (let i = 0; i < questions.length; i++) {
+				const q = questions[i]
+				const answer = await askText(
+					conversation,
+					ctx,
+					`📌 *${pickedVacancy?.title ?? 'Vakansiya'} uchun savol ${i + 1}:*
+
+${q.label}`,
+					{ cancel: true, oneTime: true }
+				)
+				ctx.session.temp.answers[q.key] = `${q.label}: ${Validators.sanitizeText(answer)}`
+			}
+			ctx.session.temp.vacancyQuestionsAsked = true
+		} catch (err) {
+			if (isNavSignal(err)) {
+				const signal = err.message as NavSignal
+				if ((await handleNavSignal(ctx, applicationId, signal)) === 'RETURN') return
+			}
+			throw err
+		}
+	}
+
 
 	let step: StepKey = ctx.session.currentStep ?? StepKey.PERSON_FULL_NAME
 
@@ -1636,6 +1688,14 @@ function buildSummaryFromTemp(answers: Record<string, any>): string {
 	if (answers.communication_skill) summary += `🗣️ Muloqot: ${answers.communication_skill}\n`
 	if (answers.expected_salary) summary += `💰 Oylik: ${answers.expected_salary}\n`
 	if (answers.start_date) summary += `🚀 Boshlash: ${answers.start_date}\n`
+
+	const vacancyQuestionKeys = Object.keys(answers).filter(key => key.startsWith('vacancy_q_')).sort()
+	if (vacancyQuestionKeys.length > 0) {
+		summary += '\n📌 Vakansiya savollari:\n'
+		for (const key of vacancyQuestionKeys) {
+			summary += `• ${answers[key]}\n`
+		}
+	}
 
 	return summary
 }

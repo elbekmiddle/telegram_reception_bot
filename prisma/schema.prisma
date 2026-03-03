@@ -65,6 +65,7 @@ model Vacancy {
   description  String?
   salaryFrom   Int?          @map("salary_from")  // Add this field
   salaryTo     Int?          @map("salary_to")    // Add this field
+  questions    Json?         @default("[]")
   isActive     Boolean       @default(true) @map("is_active")
   createdAt    DateTime      @default(now()) @map("created_at")
   updatedAt    DateTime      @updatedAt @map("updated_at")
