@@ -6,7 +6,10 @@ import { logger } from '../utils/logger'
 import { StepKey } from '../config/constants'
 
 export class ApplicationService {
-	async createApplication(telegramId: number, vacancyId?: string | null): Promise<Application> {
+	async createApplication(
+		telegramId: number,
+		opts?: { vacancyId?: string | null; userId?: string | null }
+	): Promise<Application> {
 		try {
 			// number ni bigint ga aylantirish
 			const existing = await applicationRepo.findByTelegramId(BigInt(telegramId))
@@ -16,9 +19,10 @@ export class ApplicationService {
 
 			const app = await applicationRepo.create({
 				telegramId: BigInt(telegramId),
+				userId: opts?.userId ?? null,
 				status: ApplicationStatus.IN_PROGRESS,
 				currentStep: StepKey.PERSON_FULL_NAME,
-				vacancyId: vacancyId ?? null
+				vacancyId: opts?.vacancyId ?? null
 			})
 
 			logger.info({ telegramId, appId: app.id }, 'New application created')

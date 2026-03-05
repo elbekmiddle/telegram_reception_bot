@@ -4,9 +4,150 @@ import { InlineKeyboard } from 'grammy'
 import { type BotContext } from '../bot'
 import { adminService } from '../../services/admin.service'
 import { applicationService } from '../../services/application.service'
+import { prisma } from '../../db/prisma'
 import { logger } from '../../utils/logger'
 
 export function setupAdminHandlers(bot: Bot<BotContext>): void {
+	// Kursga yozilishni qabul qilish
+	// bot.callbackQuery(/^CE\|APPROVE\|/, async ctx => {
+	// 	try {
+	// 		await ctx.answerCallbackQuery()
+	// 		const data = ctx.callbackQuery.data
+	// 		if (!data) return
+	// 		const enrollId = data.split('|')[2]
+	// 		const enr = await prisma.courseEnrollment.update({
+	// 			where: { id: enrollId },
+	// 			data: { status: 'APPROVED' }
+	// 		})
+	// 		await ctx.editMessageText('✅ Kursga yozilish qabul qilindi', { parse_mode: 'Markdown' })
+	// 		const user = await prisma.user.findUnique({ where: { id: enr.userId } })
+	// 		if (user) {
+	// 			await ctx.api.sendMessage(
+	// 				Number(user.telegramId),
+	// 				"✅ *Kursga yozilish qabul qilindi!*\n\nTez orada siz bilan bog'lanamiz.",
+	// 				{ parse_mode: 'Markdown' }
+	// 			)
+	// 		}
+	// 	} catch (err) {
+	// 		logger.error({ err }, 'Course enrollment approve failed')
+	// 	}
+	// })
+	// admin.handlers.ts ga qo'shimcha
+
+	// Ariza qabul qilish va xabar yuborish
+	bot.callbackQuery(/^AD\|APPROVE\|/, async ctx => {
+		try {
+			await ctx.answerCallbackQuery()
+			const applicationId = ctx.callbackQuery.data.split('|')[2]
+
+			const application = await prisma.application.findUnique({
+				where: { id: applicationId },
+				include: { user: true }
+			})
+
+			if (!application) {
+				await ctx.reply('Ariza topilmadi')
+				return
+			}
+
+			// Arizani qabul qilish
+			await prisma.application.update({
+				where: { id: applicationId },
+				data: { status: 'APPROVED' }
+			})
+
+			// Arizachiga xabar yuborish uchun tugmalar
+			const userKb = new InlineKeyboard()
+				.text('📅 Bugun', 'SCHEDULE|TODAY')
+				.text('📅 Ertaga', 'SCHEDULE|TOMORROW')
+				.row()
+				.text('📅 3 kundan keyin', 'SCHEDULE|3DAYS')
+				.text('✍️ Qoʻlda kiritish', 'SCHEDULE|CUSTOM')
+
+			await ctx.reply(
+				`✅ Ariza qabul qilindi!\n\nFoydalanuvchiga qachon ish boshlashini tanlang:`,
+				{ reply_markup: userKb }
+			)
+
+			// Sessiyaga saqlash
+			ctx.session.temp = {
+				...ctx.session.temp,
+				approvedApplicationId: applicationId,
+				userTelegramId: application.telegramId.toString()
+			}
+		} catch (err) {
+			logger.error({ err }, 'Approve failed')
+		}
+	})
+
+	// Ish boshlash sanasini tanlash
+	bot.callbackQuery(/^SCHEDULE\|/, async ctx => {
+		try {
+			await ctx.answerCallbackQuery()
+			const schedule = ctx.callbackQuery.data.split('|')[1]
+			const { approvedApplicationId, userTelegramId } = ctx.session.temp || {}
+
+			if (!approvedApplicationId || !userTelegramId) {
+				await ctx.reply('Xatolik yuz berdi. Qaytadan urinib koʻring.')
+				return
+			}
+
+			let startDate = ''
+			const now = new Date()
+
+			switch (schedule) {
+				case 'TODAY':
+					startDate = 'bugun'
+					break
+				case 'TOMORROW':
+					startDate = 'ertaga'
+					break
+				case '3DAYS':
+					startDate = '3 kundan keyin'
+					break
+				case 'CUSTOM':
+					await ctx.reply('✍️ *Ish boshlash sanasini kiriting* (masalan: 2026-03-10):')
+					return // Conversation kerak
+			}
+
+			// Foydalanuvchiga xabar yuborish
+			await ctx.api.sendMessage(
+				Number(userTelegramId),
+				`✅ *Arizangiz qabul qilindi!*\n\nIsh boshlash sanasi: *${startDate}*`,
+				{ parse_mode: 'Markdown' }
+			)
+
+			await ctx.reply('✅ Xabar foydalanuvchiga yuborildi!')
+		} catch (err) {
+			logger.error({ err }, 'Schedule failed')
+		}
+	})
+
+	// Kursga yozilishni rad etish
+	bot.callbackQuery(/^CE\|REJECT\|/, async ctx => {
+		try {
+			await ctx.answerCallbackQuery()
+			const data = ctx.callbackQuery.data
+			if (!data) return
+			const enrollId = data.split('|')[2]
+			const enr = await prisma.courseEnrollment.update({
+				where: { id: enrollId },
+				data: { status: 'REJECTED' }
+			})
+			await ctx.editMessageText('❌ Kursga yozilish rad etildi', { parse_mode: 'Markdown' })
+			const user = await prisma.user.findUnique({ where: { id: enr.userId } })
+			if (user) {
+				await ctx.api.sendMessage(
+					Number(user.telegramId),
+					'❌ *Kursga yozilish rad etildi.*\n\n/ start orqali boshqa kursni tanlashingiz mumkin.',
+					{ parse_mode: 'Markdown' }
+				)
+			}
+		} catch (err) {
+			logger.error({ err }, 'Course enrollment reject failed')
+		}
+	})
+
 	// Ariza qabul qilish (APPROVE)
 	bot.callbackQuery(/^AD\|APPROVE\|/, async ctx => {
 		try {

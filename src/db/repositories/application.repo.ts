@@ -4,6 +4,7 @@ import { logger } from '../../utils/logger'
 
 export type CreateApplicationDTO = {
 	telegramId: bigint
+	userId?: string | null
 	status: ApplicationStatus
 	currentStep: string
 	vacancyId?: string | null
@@ -15,6 +16,7 @@ export class ApplicationRepository {
 			return await prisma.application.create({
 				data: {
 					telegramId: data.telegramId,
+					userId: data.userId ?? null,
 					status: data.status,
 					currentStep: data.currentStep,
 					vacancyId: data.vacancyId ?? null

@@ -1,31 +1,19 @@
 import { type Bot } from 'grammy'
 import { type BotContext } from './bot'
 import { logger } from '../utils/logger'
+import { showStartMenu } from './start.menu'
 
 export function setupCommands(bot: Bot<BotContext>): void {
-	// Start command - conversationni boshlaydi
-	bot.command('start', async ctx => {
-		try {
-			logger.debug({ userId: ctx.from?.id }, 'Start command received')
-
-			// Agar conversation active bo'lsa, to'xtatib yangisini boshlaymiz
-			const activeConversations = await ctx.conversation.active()
-			if (activeConversations.length > 0) {
-				await ctx.conversation.exit()
-			}
-
-			// Application flow ni boshlaymiz
-			await ctx.conversation.enter('applicationFlow')
-		} catch (err) {
-			logger.error({ err, userId: ctx.from?.id }, 'Start command error')
-			await ctx.reply("Xatolik yuz berdi. Qayta urinib ko'ring.")
-		}
-	})
+	// /start is handled as a simple menu (not a conversation)
+	bot.command('start', showStartMenu)
 
 	// Admin command
 	bot.command('admin', async ctx => {
 		try {
-			const isAdmin = ctx.from?.id.toString() === process.env.ADMIN_CHAT_ID
+			const id = ctx.from?.id
+			const a1 = Number(process.env.ADMIN_CHAT_ID || 0)
+			const a2 = Number(process.env.ADMIN_CHAT_ID_2 || 0)
+			const isAdmin = Boolean(id && (id === a1 || id === a2))
 			if (!isAdmin) {
 				await ctx.reply('Bu buyruq faqat adminlar uchun.')
 				return

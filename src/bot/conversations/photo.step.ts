@@ -1,5 +1,7 @@
-import { InlineKeyboard } from 'grammy'
+import { InlineKeyboard, InputFile } from 'grammy'
 import type { Conversation } from '@grammyjs/conversations'
+import fs from 'node:fs'
+import path from 'node:path'
 import { type BotContext } from '../bot'
 import { photoService, type HalfBodyPhotoRules } from '../../services/photo.service'
 import { keyboards } from '../../utils/keyboards'
@@ -58,20 +60,30 @@ export class PhotoStep {
 				'',
 				'✅ *Talablar:*',
 				"• Rasm *beldan yuqori qismi* bo'lishi kerak",
-				"• Yuzingiz aniq ko'rinsin",
-				'• Tik (portret) format',
-				`• Minimal o'lcham: ${rules.minWidth}x${rules.minHeight} piksel`,
-				`• Maksimal o'lcham: 4000x4000 piksel`,
-				"• Rasmda faqat siz bo'lishingiz kerak",
-				"• Fon oddiy va bir xil bo'lishi tavsiya etiladi",
-				'',
-				"*Eslatma:* Rasm sifati past bo'lsa yoki juda katta bo'lsa, qayta yuborishingiz kerak bo'ladi.",
+				"• Yuzingiz aniq ko'rinsin (bot yuz borligini tekshiradi)",
+				'• Tik (portret) format tavsiya',
+				"• Rasmda faqat siz bo'ling",
 				'',
 				'Rasmni yuboring:'
 			].join('\n'),
 			{ parse_mode: 'Markdown', reply_markup: kb }
 		)
 		lastMessageId = sentMsg.message_id
+
+		// Demo rasm (foydalanuvchiga qanday rasm kerakligini ko'rsatish)
+		try {
+			const demoPath = path.resolve(process.cwd(), 'dist/assets/half_body_example.jpg')
+			const fallbackPath = path.resolve(process.cwd(), 'src/assets/half_body_example.jpg')
+			const p = fs.existsSync(demoPath) ? demoPath : fallbackPath
+			if (fs.existsSync(p)) {
+				await ctx.replyWithPhoto(new InputFile(fs.createReadStream(p)), {
+					caption: "✅ Namuna (belidan yuqori rasm shunaqa bo'lsin)",
+					parse_mode: 'Markdown'
+				})
+			}
+		} catch {
+			// ignore demo errors
+		}
 
 		while (true) {
 			const u = await conversation.wait()
@@ -194,8 +206,23 @@ export class PhotoStep {
 					}
 				}
 
-				// Rasmni Cloudinary ga yuklash
+				// Rasmni Cloudinary ga yuklash (yuz aniqlash bilan)
 				const uploaded = await photoService.uploadBufferToCloudinary(validated.buffer)
+				if (!uploaded.faces || uploaded.faces.length === 0) {
+					if (lastMessageId) {
+						try {
+							await ctx.api.deleteMessage(ctx.chat!.id, lastMessageId)
+						} catch {
+							// ignore
+						}
+					}
+					const warn = await ctx.reply(
+						'❌ Rasmda yuz aniqlanmadi. Iltimos, belidan yuqori va yuz aniq ko‘rinadigan rasm yuboring.',
+						{ parse_mode: 'Markdown', reply_markup: keyboards.photoRetryOrRules() }
+					)
+					lastMessageId = warn.message_id
+					continue
+				}
 
 				// Rasm hashini saqlash
 				await applicationService.saveAnswer(
@@ -215,6 +242,14 @@ export class PhotoStep {
 						ratio: validated.ratio
 					}
 				})
+
+				// Admin summary uchun linkni answer sifatida ham saqlab qo'yamiz
+				await applicationService.saveAnswer(
+					applicationId,
+					'photo_half_body',
+					uploaded.secureUrl,
+					AnswerFieldType.TEXT
+				)
 
 				// Muvaffaqiyatli yuklandi
 				if (lastMessageId) {

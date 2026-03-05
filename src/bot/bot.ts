@@ -1,4 +1,4 @@
-import { Bot, Context as GrammyContext, type MiddlewareFn } from 'grammy'
+import { Bot, Context, Context as GrammyContext, type MiddlewareFn } from 'grammy'
 import { conversations, createConversation, type ConversationFlavor } from '@grammyjs/conversations'
 import { type SessionFlavor } from 'grammy'
 import express, { Request, Response } from "express"
@@ -13,7 +13,10 @@ import { setupHandlers } from './handlers'
 import { setupAdminHandlers } from './handlers/admin'
 import { applicationFlow } from './conversations/application.flow'
 import { adminFlow } from './conversations/admin.flow'
+import { courseFlow } from './conversations/course.flow'
+import { handleStartChoice } from './start.menu'
 import type { SessionData } from '../types/session'
+import { setDirectBot } from './conversations/direct-api'
 
 type BotState = {
 	telegramId?: number
@@ -33,6 +36,7 @@ const stateMiddleware: MiddlewareFn<BotContext> = async (ctx, next) => {
 }
 
 export const bot = new Bot<BotContext>(env.BOT_TOKEN)
+setDirectBot(bot)
 
 // MUHIM ORDER:
 // 1. Session
@@ -50,6 +54,7 @@ bot.use(conversations())
 // Conversationlarni register qilish
 bot.use(createConversation(applicationFlow, 'applicationFlow'))
 bot.use(createConversation(adminFlow, 'adminFlow'))
+bot.use(createConversation(courseFlow, 'courseFlow'))
 
 // Rate limit - callbacklarni o'tkazib yuborish uchun
 bot.use(rateLimitMiddleware)
@@ -60,6 +65,9 @@ bot.use(authMiddleware)
 // Commands va handlers eng oxirida
 setupCommands(bot)
 setupHandlers(bot)
+
+// Start menu buttons (Vacancy / Courses)
+bot.callbackQuery(/^START\|(VAC|COURSE)$/, handleStartChoice)
 setupAdminHandlers(bot)
 
 bot.catch(err => {

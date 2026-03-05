@@ -1,5 +1,6 @@
 
 import { answerRepo } from '../db/repositories/answer.repo'
+import { prisma } from '../db/prisma'
 
 function calculateAgeFromBirthDate(date: string): number | null {
 	const m = date.match(/^(\d{2})\.(\d{2})\.(\d{4})$/)
@@ -236,6 +237,10 @@ export async function buildSummary(applicationId: string): Promise<string> {
 export async function buildAdminSummary(applicationId: string): Promise<string> {
 	const answers = await answerRepo.getByApplicationId(applicationId)
 	const answerMap = new Map(answers.map(a => [a.fieldKey, a.fieldValue]))
+	const app = await prisma.application.findUnique({
+		where: { id: applicationId },
+		include: { vacancy: true }
+	})
 
 	// Yoshni hisoblash
 	const birthDate = answerMap.get('birth_date')
@@ -275,35 +280,54 @@ export async function buildAdminSummary(applicationId: string): Promise<string> 
 		}
 	}
 
+	// Vakansiya savollari
+	const vq = Array.from(answerMap.entries()).filter(([k]) => k.startsWith('VQ|'))
+	let vqBlock = ''
+	if (vq.length) {
+		const vacancyId = app?.vacancyId ?? null
+		const qMap = new Map<string, string>()
+		if (vacancyId) {
+			const qs = await prisma.vacancyQuestion.findMany({ where: { vacancyId } })
+			for (const q of qs) qMap.set(q.key, q.question)
+		}
+		vqBlock += `\n❓ *Vakansiya savollari:*\n`
+		for (const [k, v] of vq) {
+			const key = k.replace('VQ|', '')
+			const label = qMap.get(key) ?? key
+			let display = v
+			try {
+				const parsed = JSON.parse(v)
+				if (Array.isArray(parsed)) display = parsed.join(', ')
+			} catch {
+				// ignore
+			}
+			vqBlock += `• ${label}: ${display}\n`
+		}
+	}
+
+	const vacTitle = app?.vacancy?.title ?? '—'
+	const vacSalary = app?.vacancy?.salaryFrom
+		? app?.vacancy?.salaryTo
+			? `${app.vacancy.salaryFrom.toLocaleString('ru-RU')} - ${app.vacancy.salaryTo.toLocaleString('ru-RU')} so'm`
+			: `${app.vacancy.salaryFrom.toLocaleString('ru-RU')} so'm`
+		: 'Kelishilgan'
+
 	return `
-📋 *YANGI ARIZA* #${applicationId.slice(0, 8)}
+	📋 *YANGI ARIZA* #${applicationId.slice(0, 8)}
 
-👤 *Shaxsiy ma'lumotlar:*
-• Ism: ${answerMap.get('full_name') || '—'}
-• Tug'ilgan sana: ${birthDate || '—'}${ageDisplay}
-• Telefon: ${answerMap.get('phone') || '—'}
-• Manzil: ${answerMap.get('address') || '—'}
+	📌 *Vakansiya:* ${vacTitle}
+	💰 *Oylik:* ${vacSalary}
 
-🎓 *Ta'lim:*
-• O'quv yurti: ${formatEducationType(answerMap.get('education_type') || '—')}
-• Mutaxassislik: ${answerMap.get('speciality') || '—'}
-• Sertifikatlar: ${certsDisplay}
+	👤 *Shaxsiy ma'lumotlar:*
+	• Ism: ${answerMap.get('full_name') || '—'}
+	• Tug'ilgan sana: ${birthDate || '—'}${ageDisplay}
+	• Telefon: ${answerMap.get('phone') || '—'}
+	• Manzil: ${answerMap.get('address') || '—'}
 
-💼 *Ish tajribasi:*
-• Ish joyi: ${answerMap.get('exp_company') || '—'}
-• Muddat: ${answerMap.get('exp_duration') || '—'}
-• Lavozim: ${answerMap.get('exp_position') || '—'}
-• Ish muddati: ${answerMap.get('exp_can_work_how_long') || '—'}
+	📎 *Rasm:* ${answerMap.get('photo_half_body') ? '✅ Yuborilgan' : '—'}
+${vqBlock}
 
-💻 *Ko'nikmalar:*
-• Kompyuter: ${skillsDisplay}
-
-💰 *Kutmalar:*
-• Ish vaqti: ${formatWorkShift(answerMap.get('work_shift') || '—')}
-• Oylik: ${answerMap.get('expected_salary') || '—'}
-• Boshlash: ${answerMap.get('start_date') || '—'}
-
-📅 *Ariza sanasi:* ${new Date().toLocaleDateString('uz-UZ')}
+	📅 *Ariza sanasi:* ${new Date().toLocaleDateString('uz-UZ')}
   `.trim()
 }
 

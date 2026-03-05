@@ -1,6 +1,8 @@
 import sharp from 'sharp'
 import axios from 'axios'
 import { v2 as cloudinary } from 'cloudinary'
+import path from 'path'
+import fs from 'fs'
 
 import { env } from '../config/env'
 import { logger } from '../utils/logger'
@@ -11,7 +13,6 @@ export type HalfBodyPhotoRules = {
 	minHeight: number
 	minRatio: number
 	maxRatio: number
-	// Yangi parametrlar - minimal va maksimal o'lchamlar
 	maxWidth?: number
 	maxHeight?: number
 }
@@ -48,6 +49,8 @@ export class PhotoService {
 			if (!file.file_path) {
 				return { ok: false, reason: 'Rasmni olishda xatolik. Qayta yuboring.' }
 			}
+			
+			// TO'G'RI: Telegram API orqali yuklanadi
 			const url = `https://api.telegram.org/file/bot${env.BOT_TOKEN}/${file.file_path}`
 
 			const res = await axios.get<ArrayBuffer>(url, { responseType: 'arraybuffer' })
@@ -57,47 +60,9 @@ export class PhotoService {
 			const width = meta.width ?? 0
 			const height = meta.height ?? 0
 
-			// Minimal o'lcham tekshiruvi (agar juda kichik bo'lsa)
-			if (width < rules.minWidth || height < rules.minHeight) {
-				return {
-					ok: false,
-					reason: `Rasm sifati past. Minimal o'lcham ${rules.minWidth}x${rules.minHeight} bo'lishi kerak. Hozirgi: ${width}x${height}`
-				}
-			}
-
-			// Maksimal o'lcham tekshiruvi (agar juda katta bo'lsa - 4K dan katta)
-			const MAX_WIDTH = 4000
-			const MAX_HEIGHT = 4000
-			if (width > MAX_WIDTH || height > MAX_HEIGHT) {
-				return {
-					ok: false,
-					reason: `Rasm juda katta. Maksimal o'lcham ${MAX_WIDTH}x${MAX_HEIGHT} bo'lishi kerak. Hozirgi: ${width}x${height}`
-				}
-			}
-
-			// Portret format tekshiruvi (bo'yi enidan katta bo'lishi kerak)
-			if (height <= width) {
-				return {
-					ok: false,
-					reason:
-						"Rasm tik (portret) formatda bo'lishi kerak (bo'yi enidan katta). Iltimos, vertikal rasm yuboring."
-				}
-			}
-
-			// Nisbat tekshiruvi (half body uchun taxminan 0.6 - 0.9 oralig'i)
-			const ratio = width / height
-			if (ratio < rules.minRatio || ratio > rules.maxRatio) {
-				return {
-					ok: false,
-					reason: `Rasm nisbatlari mos emas. Belidan yuqori (tik) rasm yuboring. Optimal nisbat 0.7-0.85 atrofida. Hozirgi: ${ratio.toFixed(
-						2
-					)}`
-				}
-			}
-
-			// Rasmda yuz bor-yo'qligini tekshirish (oddiy tekshiruv)
-			// Bu yerda face detection qo'shish mumkin, lekin hozircha o'tkazib yuboramiz
-
+			// Cheklovlarni olib tashlaymiz: faqat rasm borligini va metadata o'qilishini tekshiramiz.
+			// Face tekshiruv Cloudinary upload bosqichida qilinadi.
+			const ratio = height > 0 ? width / height : 0
 			return { ok: true, width, height, ratio, buffer }
 		} catch (err) {
 			logger.error({ err }, 'Photo validation failed')
@@ -105,21 +70,54 @@ export class PhotoService {
 		}
 	}
 
-	async uploadBufferToCloudinary(buffer: Buffer): Promise<{ secureUrl: string; publicId: string }> {
+	/**
+	 * Get demo photo buffer from local file system
+	 * YANGI: Demo rasm uchun alohida method
+	 */
+	async getDemoPhotoBuffer(): Promise<Buffer | null> {
+		try {
+			// Try multiple possible paths
+			const possiblePaths = [
+				path.join(process.cwd(), 'assets', 'half_body_example.jpg'),
+				path.join(process.cwd(), 'src', 'assets', 'half_body_example.jpg'),
+				path.join(process.cwd(), 'public', 'demo', 'photo.jpg'),
+				path.join(__dirname, '..', '..', 'assets', 'half_body_example.jpg')
+			]
+
+			for (const filePath of possiblePaths) {
+				if (fs.existsSync(filePath)) {
+					logger.info({ filePath }, 'Found demo photo')
+					return fs.readFileSync(filePath)
+				}
+			}
+
+			logger.warn('Demo photo file not found in any expected location')
+			return null
+		} catch (err) {
+			logger.error({ err }, 'Failed to read demo photo')
+			return null
+		}
+	}
+
+	async uploadBufferToCloudinary(
+		buffer: Buffer
+	): Promise<{ secureUrl: string; publicId: string; faces: Array<{ x: number; y: number; w: number; h: number }> }> {
 		return new Promise((resolve, reject) => {
 			const stream = cloudinary.uploader.upload_stream(
 				{
 					folder: 'telegram-reception-bot/half_body',
 					resource_type: 'image',
 					quality: 'auto',
-					fetch_format: 'auto'
+					fetch_format: 'auto',
+					faces: true
 				},
 				(error, result) => {
 					if (error || !result) {
 						reject(error ?? new Error('Cloudinary upload failed'))
 						return
 					}
-					resolve({ secureUrl: result.secure_url, publicId: result.public_id })
+					const faces = (result.faces as any[]) ?? []
+					resolve({ secureUrl: result.secure_url, publicId: result.public_id, faces })
 				}
 			)
 			stream.end(buffer)

@@ -33,6 +33,7 @@ enum AnswerFieldType {
 model Application {
   id              String             @id @default(uuid())
   telegramId      BigInt             @map("telegram_id")
+  userId          String?            @map("user_id")
   status          ApplicationStatus  @default(NEW)
   currentStep     String?            @map("current_step")
 
@@ -51,53 +52,169 @@ model Application {
   answers         ApplicationAnswer[]
   files           ApplicationFile[]
 
+  user            User?              @relation(fields: [userId], references: [id])
+
   vacancy         Vacancy?           @relation(fields: [vacancyId], references: [id])
 
   @@index([telegramId])
+  @@index([userId])
   @@index([status])
   @@index([telegramId, status])
   @@map("applications")
 }
 
-model Vacancy {
-  id           String        @id @default(uuid())
-  title        String
-  description  String?
-  salaryFrom   Int?          @map("salary_from")  // Add this field
-  salaryTo     Int?          @map("salary_to")    // Add this field
-  isActive     Boolean       @default(true) @map("is_active")
-  createdAt    DateTime      @default(now()) @map("created_at")
-  updatedAt    DateTime      @updatedAt @map("updated_at")
+model User {
+  id         String   @id @default(uuid())
+  telegramId BigInt   @unique @map("telegram_id")
+  firstName  String?  @map("first_name")
+  lastName   String?  @map("last_name")
+  username   String?
+  lastSeenAt DateTime @default(now()) @map("last_seen_at")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
 
-  applications Application[]
+  applications     Application[]
+  courseEnrollments CourseEnrollment[]
 
-  @@index([isActive])
-  @@map("vacancies")
+  @@map("users")
 }
 
-enum CourseLevel {
-  A1
-  A2
-  B1
-  B2
-  C1
-  C2
-  IELTS
-  TOEFL
-  OTHER
+// model Vacancy {
+//   id           String        @id @default(uuid())
+//   title        String
+//   salary       String?       // Simple text field for salary
+//   isActive     Boolean       @default(true) @map("is_active")
+//   createdAt    DateTime      @default(now()) @map("created_at")
+//   updatedAt    DateTime      @updatedAt @map("updated_at")
+
+//   applications Application[]
+//   questions    VacancyQuestion[]
+
+//   @@index([isActive])
+//   @@map("vacancies")
+// }
+model Vacancy {
+    id           String        @id @default(uuid())
+    title        String
+    description  String?       // Add this field
+    salaryFrom   Int?          @map("salary_from")  // Add this field
+    salaryTo     Int?          @map("salary_to")    // Add this field
+    salary       String?       // Keep or remove this
+    isActive     Boolean       @default(true) @map("is_active")
+    createdAt    DateTime      @default(now()) @map("created_at")
+    updatedAt    DateTime      @updatedAt @map("updated_at")
+
+    applications Application[]
+    questions    VacancyQuestion[]
+
+    @@index([isActive])
+    @@map("vacancies")
+}
+
+enum QuestionType {
+  TEXT
+  SINGLE_SELECT
+  MULTI_SELECT
+}
+
+model VacancyQuestion {
+  id         String        @id @default(uuid())
+  vacancyId  String        @map("vacancy_id")
+  question   String        // Question text
+  type       QuestionType  @default(TEXT) // Question type
+  order      Int           @default(0)
+  createdAt  DateTime      @default(now()) @map("created_at")
+
+  vacancy    Vacancy       @relation(fields: [vacancyId], references: [id], onDelete: Cascade)
+  options    QuestionOption[]
+
+  @@index([vacancyId])
+  @@map("vacancy_questions")
+}
+
+model QuestionOption {
+  id         String          @id @default(uuid())
+  questionId String          @map("question_id")
+  text       String          // Option text/label
+  value      String          // Callback value
+  order      Int             @default(0)
+  createdAt  DateTime        @default(now()) @map("created_at")
+
+  question   VacancyQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@index([questionId])
+  @@map("question_options")
 }
 
 model Course {
   id          String      @id @default(uuid())
   title       String
-  level       CourseLevel
   description String?
+  price       String?     // Simple text field for price  
   isActive    Boolean     @default(true) @map("is_active")
   createdAt   DateTime    @default(now()) @map("created_at")
   updatedAt   DateTime    @updatedAt @map("updated_at")
 
+  enrollments CourseEnrollment[]
+  questions   CourseQuestion[]
+
   @@index([isActive])
   @@map("courses")
+}
+
+model CourseQuestion {
+  id         String        @id @default(uuid())
+  courseId   String        @map("course_id")
+  question   String        // Question text
+  type       QuestionType  @default(TEXT) // Question type
+  order      Int           @default(0)
+  createdAt  DateTime      @default(now()) @map("created_at")
+
+  course     Course        @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  options    CourseQuestionOption[]
+
+  @@index([courseId])
+  @@map("course_questions")
+}
+
+model CourseQuestionOption {
+  id         String         @id @default(uuid())
+  questionId String         @map("question_id")
+  text       String         // Option text/label
+  value      String         // Callback value
+  order      Int            @default(0)
+  createdAt  DateTime       @default(now()) @map("created_at")
+
+  question   CourseQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@index([questionId])
+  @@map("course_question_options")
+}
+
+enum EnrollmentStatus {
+  NEW
+  APPROVED
+  REJECTED
+}
+
+model CourseEnrollment {
+  id           String           @id @default(uuid())
+  courseId     String           @map("course_id")
+  userId       String           @map("user_id")
+  fullName     String           @map("full_name")
+  phone        String
+  photoFileId  String?          @map("photo_file_id") // Telegram file ID for photo
+  answers      Json             @default("{}") // Store all question answers
+  status       EnrollmentStatus @default(NEW)
+  createdAt    DateTime         @default(now()) @map("created_at")
+  updatedAt    DateTime         @updatedAt @map("updated_at")
+
+  course       Course           @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  user         User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([courseId])
+  @@index([userId])
+  @@map("course_enrollments")
 }
 
 model ApplicationAnswer {
