@@ -1,6 +1,7 @@
 import { InlineKeyboard } from 'grammy'
 import type { BotContext } from './bot'
 import { logger } from '../utils/logger'
+import { userService } from '../services/user.service'
 
 async function deletePrevBotMessage(ctx: BotContext) {
 	const msgId = ctx.session.lastBotMessageId
@@ -37,6 +38,7 @@ async function exitAllConversations(ctx: BotContext): Promise<void> {
 
 export async function showStartMenu(ctx: BotContext): Promise<void> {
 	try {
+		await userService.upsertFromCtx(ctx)
 		await exitAllConversations(ctx)
 
 		const kb = new InlineKeyboard()

@@ -19,14 +19,23 @@ export interface CreateOptionData {
 }
 
 export class VacancyService {
-	/**
-	 * List all active vacancies (limit to 5)
-	 */
+	async countActive() {
+		return prisma.vacancy.count({ where: { isActive: true } })
+	}
+
 	async listActive() {
 		return prisma.vacancy.findMany({
 			where: { isActive: true },
+			orderBy: { createdAt: 'desc' }
+		})
+	}
+
+	async listActivePage(page: number, take = 5) {
+		return prisma.vacancy.findMany({
+			where: { isActive: true },
 			orderBy: { createdAt: 'desc' },
-			take: 5
+			skip: page * take,
+			take
 		})
 	}
 
