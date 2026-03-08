@@ -23,8 +23,10 @@ export async function directSendPhoto(
 
 		if (photo instanceof Buffer) {
 			photoToSend = new InputFile(photo)
-		} else {
+		} else if (typeof photo === 'string' || photo instanceof InputFile) {
 			photoToSend = photo
+		} else {
+			photoToSend = new InputFile(photo)
 		}
 
 		await directBot.api.sendPhoto(chatId, photoToSend, options)

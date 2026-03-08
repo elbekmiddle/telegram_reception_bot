@@ -4,26 +4,17 @@ import { InlineKeyboard } from 'grammy'
 import type { BotContext } from '../bot'
 import { logger } from '../../utils/logger'
 import { prisma } from '../../db/prisma'
-import { askText, askChoice, replaceBotMessage } from './flow-helpers'
+import { askText, askChoice, replaceBotMessage, navError, isNavSignal } from './flow-helpers'
+import { showStartMenu } from '../start.menu'
+import { exportToExcel } from '../../utils/excel-export'
+import { InputFile } from 'grammy'
 
 type AdminNavSignal = 'START' | 'ADMIN'
 
+const adminNavError = (sig: AdminNavSignal) => new Error(sig)
+
 function isAdminNavSignal(err: unknown): err is Error {
 	return err instanceof Error && (err.message === 'START' || err.message === 'ADMIN')
-}
-
-type TopCourseStat = {
-	title: string
-	_count: {
-		enrollments: number
-	}
-}
-
-type TopVacancyStat = {
-	title: string
-	_count: {
-		applications: number
-	}
 }
 
 function isAdmin(ctx: BotContext): boolean {
@@ -44,7 +35,6 @@ async function manageVacancies(
 
 	while (true) {
 		const total = await prisma.vacancy.count()
-
 		if (total === 0) {
 			await ctx.reply('📭 *Vakansiyalar yo‘q*', { parse_mode: 'Markdown' })
 			return
@@ -59,6 +49,7 @@ async function manageVacancies(
 			take: perPage
 		})
 
+		// Takroriy nomlarni aniqlash
 		const titleCounts = new Map<string, number>()
 		items.forEach(v => {
 			titleCounts.set(v.title, (titleCounts.get(v.title) || 0) + 1)
@@ -69,7 +60,7 @@ async function manageVacancies(
 
 		for (const v of items) {
 			const salaryIcon = v.salary ? '💰' : '⚪️'
-			const repeatIcon = (titleCounts.get(v.title) || 0) > 1 ? '🔄' : ''
+			const repeatIcon = titleCounts.get(v.title)! > 1 ? '🔄' : ''
 
 			text += `${v.isActive ? '✅' : '⛔️'} *${v.title}* ${repeatIcon}\n`
 			text += `   ${salaryIcon} ${v.salary || 'Maosh kiritilmagan'}\n`
@@ -91,7 +82,6 @@ async function manageVacancies(
 		const upd = await conversation.wait()
 		const data = upd.callbackQuery?.data
 		if (!data) continue
-
 		await upd.answerCallbackQuery().catch(() => {})
 
 		if (data === 'NAV|BACK') return
@@ -145,6 +135,7 @@ async function viewVacancy(
 		.text('🔀 Faollik', `VAC_EDIT|TOGGLE|${vacancy.id}`)
 		.text('❓ Savollar', `VAC_QUESTIONS|${vacancy.id}`)
 		.row()
+		.text('📋 Arizalar', `VAC_APPLICATIONS|${vacancy.id}`)
 		.text('🗑 O‘chirish', `VAC_DELETE|${vacancy.id}`)
 		.row()
 		.text('⬅️ Orqaga', 'VAC_BACK')
@@ -154,7 +145,6 @@ async function viewVacancy(
 	const upd = await conversation.wait()
 	const data = upd.callbackQuery?.data
 	if (!data) return
-
 	await upd.answerCallbackQuery().catch(() => {})
 
 	if (data === 'VAC_BACK') return
@@ -169,14 +159,8 @@ async function viewVacancy(
 		return
 	}
 
-	if (data.startsWith('VAC_EDIT|SALARY|')) {
-		await editVacancySalary(conversation, ctx, vacancyId, true)
-		await viewVacancy(conversation, ctx, vacancyId)
-		return
-	}
-
-	if (data.startsWith('VAC_EDIT|ADD_SALARY|')) {
-		await editVacancySalary(conversation, ctx, vacancyId, false)
+	if (data.startsWith('VAC_EDIT|SALARY|') || data.startsWith('VAC_EDIT|ADD_SALARY|')) {
+		await editVacancySalary(conversation, ctx, vacancyId, data.startsWith('VAC_EDIT|SALARY|'))
 		await viewVacancy(conversation, ctx, vacancyId)
 		return
 	}
@@ -196,18 +180,51 @@ async function viewVacancy(
 		return
 	}
 
+	if (data.startsWith('VAC_APPLICATIONS|')) {
+		await viewVacancyApplications(conversation, ctx, vacancyId)
+		return
+	}
+
 	if (data.startsWith('VAC_DELETE|')) {
 		const confirm = await askChoice(conversation, ctx, '⚠️ *Rostdan ham o‘chirilsinmi?*', [
 			{ text: '✅ Ha', data: 'YES' },
 			{ text: '❌ Yo‘q', data: 'NO' }
 		])
-
 		if (confirm === 'YES') {
 			await prisma.vacancy.delete({ where: { id: vacancyId } })
 			await ctx.reply('✅ Vakansiya o‘chirildi')
 		}
 		return
 	}
+}
+
+async function viewVacancyApplications(
+	conversation: Conversation<BotContext>,
+	ctx: BotContext,
+	vacancyId: string
+): Promise<void> {
+	const applications = await prisma.application.findMany({
+		where: { vacancyId },
+		include: { answers: true, user: true },
+		orderBy: { createdAt: 'desc' },
+		take: 10
+	})
+
+	if (applications.length === 0) {
+		await ctx.reply('📭 Bu vakansiyaga arizalar yo‘q')
+		return
+	}
+
+	const text = [
+		`📋 *Arizalar (${applications.length} ta)*`,
+		'',
+		...applications.map((app, idx) => {
+			const name = app.answers.find(a => a.fieldKey === 'full_name')?.fieldValue || "Noma'lum"
+			return `${idx + 1}. ${name} - ${new Date(app.createdAt).toLocaleDateString()}`
+		})
+	].join('\n')
+
+	await ctx.reply(text, { parse_mode: 'Markdown' })
 }
 
 async function editVacancySalary(
@@ -258,7 +275,7 @@ async function editVacancySalary(
 	if (salaryValue === 'negotiable') {
 		newSalary = 'Kelishiladi'
 	} else {
-		newSalary = `${salaryValue.replace(/_/g, ' ')} soʻm`
+		newSalary = salaryValue.replace(/_/g, ' ') + ' soʻm'
 	}
 
 	await prisma.vacancy.update({
@@ -309,7 +326,6 @@ async function manageVacancyQuestions(
 		const upd = await conversation.wait()
 		const data = upd.callbackQuery?.data
 		if (!data) continue
-
 		await upd.answerCallbackQuery().catch(() => {})
 
 		if (data === 'Q_BACK') return
@@ -357,7 +373,6 @@ async function viewVacancyQuestion(
 	const upd = await conversation.wait()
 	const data = upd.callbackQuery?.data
 	if (!data) return
-
 	await upd.answerCallbackQuery().catch(() => {})
 
 	if (data === 'Q_VIEW_BACK') return
@@ -367,7 +382,6 @@ async function viewVacancyQuestion(
 			{ text: '✅ Ha', data: 'YES' },
 			{ text: '❌ Yo‘q', data: 'NO' }
 		])
-
 		if (confirm === 'YES') {
 			await prisma.vacancyQuestion.delete({ where: { id: question.id } })
 			await ctx.reply('✅ Savol o‘chirildi')
@@ -380,12 +394,14 @@ async function addVacancyQuestion(
 	ctx: BotContext,
 	vacancyId: string
 ): Promise<void> {
+	// Savol matni
 	const question = await askText(conversation, ctx, '❓ *Savol matnini kiriting:*')
 	if (!question) return
 
+	// Savol turi
 	const type = await askChoice(conversation, ctx, '🧩 *Savol turini tanlang:*', [
 		{ text: '✍️ Oddiy matn', data: 'TEXT' },
-		{ text: '🔘 Variantli', data: 'SELECT' }
+		{ text: '🔘 Variantli (SELECT)', data: 'SELECT' }
 	])
 	if (!type) return
 
@@ -425,6 +441,7 @@ async function addVacancyQuestion(
 	const orderStr = await askText(conversation, ctx, '🔢 *Tartib raqami (0 dan):*')
 	const order = Number(orderStr?.replace(/\D+/g, '')) || 0
 
+	// Savolni yaratish
 	const created = await prisma.vacancyQuestion.create({
 		data: {
 			vacancyId,
@@ -461,14 +478,13 @@ async function manageCourses(
 
 	while (true) {
 		const total = await prisma.course.count()
-
 		if (total === 0) {
 			await ctx.reply('📭 *Kurslar yoʻq*', { parse_mode: 'Markdown' })
 			return
 		}
 
-		const totalPages = Math.max(1, Math.ceil(total / perPage))
-		page = Math.min(Math.max(0, page), totalPages - 1)
+		const totalPages = Math.ceil(total / perPage)
+		page = Math.min(page, totalPages - 1)
 
 		const courses = await prisma.course.findMany({
 			skip: page * perPage,
@@ -481,7 +497,7 @@ async function manageCourses(
 
 		courses.forEach(course => {
 			text += `• ${course.isActive ? '✅' : '⛔️'} *${course.title}*\n`
-			text += `  💰 Narxi: ${course.price || 'Kiritilmagan'}\n`
+			text += `  💰 Narxi: ${course.price || 'Kiritilmagan'} soʻm\n`
 			if (course.description) {
 				text += `  📝 ${course.description.substring(0, 50)}${
 					course.description.length > 50 ? '...' : ''
@@ -500,7 +516,6 @@ async function manageCourses(
 		const upd = await conversation.wait()
 		const data = upd.callbackQuery?.data
 		if (!data) continue
-
 		await upd.answerCallbackQuery().catch(() => {})
 
 		if (data === 'NAV|BACK') return
@@ -558,6 +573,9 @@ async function viewCourse(
 
 	kb.text('🔀 Faollik', `COURSE_EDIT|TOGGLE|${course.id}`)
 		.row()
+		.text('❓ Savollar', `COURSE_QUESTIONS|${course.id}`)
+		.text('📋 Yozilishlar', `COURSE_ENROLLMENTS|${course.id}`)
+		.row()
 		.text('🗑 Oʻchirish', `COURSE_DELETE|${course.id}`)
 		.row()
 		.text('⬅️ Orqaga', 'COURSE_BACK')
@@ -567,7 +585,6 @@ async function viewCourse(
 	const upd = await conversation.wait()
 	const data = upd.callbackQuery?.data
 	if (!data) return
-
 	await upd.answerCallbackQuery().catch(() => {})
 
 	if (data === 'COURSE_BACK') return
@@ -590,7 +607,6 @@ async function viewCourse(
 				course.description || 'kiritilmagan'
 			}):\n\nTavsif kiritmasangiz, boʻsh qoldirish uchun ➖ belgisini yuboring.`
 		)
-
 		if (newDesc) {
 			const description = newDesc === '➖' ? null : newDesc
 			await prisma.course.update({ where: { id: courseId }, data: { description } })
@@ -601,7 +617,7 @@ async function viewCourse(
 	}
 
 	if (data.startsWith('COURSE_EDIT|PRICE|') || data.startsWith('COURSE_EDIT|ADD_PRICE|')) {
-		await editCoursePrice(conversation, ctx, courseId, course.price !== null)
+		await editCoursePrice(conversation, ctx, courseId, data.startsWith('COURSE_EDIT|PRICE|'))
 		await viewCourse(conversation, ctx, courseId)
 		return
 	}
@@ -621,18 +637,52 @@ async function viewCourse(
 		return
 	}
 
+	if (data.startsWith('COURSE_ENROLLMENTS|')) {
+		await viewCourseEnrollments(conversation, ctx, courseId)
+		return
+	}
+
 	if (data.startsWith('COURSE_DELETE|')) {
 		const confirm = await askChoice(conversation, ctx, '⚠️ *Rostdan ham oʻchirilsinmi?*', [
 			{ text: '✅ Ha', data: 'YES' },
 			{ text: '❌ Yoʻq', data: 'NO' }
 		])
-
 		if (confirm === 'YES') {
 			await prisma.course.delete({ where: { id: courseId } })
 			await ctx.reply('✅ Kurs oʻchirildi')
 		}
 		return
 	}
+}
+
+async function viewCourseEnrollments(
+	conversation: Conversation<BotContext>,
+	ctx: BotContext,
+	courseId: string
+): Promise<void> {
+	const enrollments = await prisma.courseEnrollment.findMany({
+		where: { courseId },
+		include: { user: true },
+		orderBy: { createdAt: 'desc' },
+		take: 10
+	})
+
+	if (enrollments.length === 0) {
+		await ctx.reply('📭 Bu kursga yozilishlar yoʻq')
+		return
+	}
+
+	const text = [
+		`📋 *Kursga yozilishlar (${enrollments.length} ta)*`,
+		'',
+		...enrollments.map((e, idx) => {
+			return `${idx + 1}. ${e.user.fullName || "Noma'lum"} - ${e.status} - ${new Date(
+				e.createdAt
+			).toLocaleDateString()}`
+		})
+	].join('\n')
+
+	await ctx.reply(text, { parse_mode: 'Markdown' })
 }
 
 async function editCoursePrice(
@@ -657,6 +707,7 @@ async function editCoursePrice(
 			{ text: '1 000 000 soʻm', data: 'PRICE|1000000' },
 			{ text: '1 500 000 soʻm', data: 'PRICE|1500000' },
 			{ text: '2 000 000 soʻm', data: 'PRICE|2000000' },
+			{ text: 'Bepul', data: 'PRICE|FREE' },
 			{ text: 'Boshqa narx', data: 'PRICE|CUSTOM' },
 			{ text: isEditing ? '❌ Oʻchirish' : '⏭ Oʻtkazib yuborish', data: 'PRICE|SKIP' }
 		],
@@ -679,12 +730,14 @@ async function editCoursePrice(
 
 	let newPrice: string | null = null
 
-	if (priceValue === 'CUSTOM') {
+	if (priceValue === 'FREE') {
+		newPrice = 'Bepul'
+	} else if (priceValue === 'CUSTOM') {
 		const customPrice = await askText(conversation, ctx, '💰 *Narxni kiriting:*')
 		const cleanPrice = customPrice.replace(/[^0-9]/g, '')
-		newPrice = cleanPrice ? `${cleanPrice} soʻm` : null
+		newPrice = cleanPrice ? `${parseInt(cleanPrice).toLocaleString()} soʻm` : null
 	} else {
-		newPrice = `${parseInt(priceValue, 10).toLocaleString()} soʻm`
+		newPrice = `${parseInt(priceValue).toLocaleString()} soʻm`
 	}
 
 	if (newPrice) {
@@ -734,7 +787,6 @@ async function manageCourseQuestions(
 		const upd = await conversation.wait()
 		const data = upd.callbackQuery?.data
 		if (!data) continue
-
 		await upd.answerCallbackQuery().catch(() => {})
 
 		if (data === 'CQ_BACK') return
@@ -782,7 +834,6 @@ async function viewCourseQuestion(
 	const upd = await conversation.wait()
 	const data = upd.callbackQuery?.data
 	if (!data) return
-
 	await upd.answerCallbackQuery().catch(() => {})
 
 	if (data === 'CQ_VIEW_BACK') return
@@ -792,7 +843,6 @@ async function viewCourseQuestion(
 			{ text: '✅ Ha', data: 'YES' },
 			{ text: '❌ Yoʻq', data: 'NO' }
 		])
-
 		if (confirm === 'YES') {
 			await prisma.courseQuestion.delete({ where: { id: question.id } })
 			await ctx.reply('✅ Savol oʻchirildi')
@@ -871,93 +921,125 @@ async function addCourseQuestion(
 	await ctx.reply('✅ Savol qoʻshildi!')
 }
 
-// ==================== APPLICATIONS MANAGEMENT ====================
+// ==================== STATISTICS WITH EXPORT ====================
 
-async function manageApplications(
+async function showStatistics(
 	conversation: Conversation<BotContext>,
 	ctx: BotContext
 ): Promise<void> {
-	const vacancies = await prisma.vacancy.findMany({
-		where: { isActive: true },
-		orderBy: { createdAt: 'desc' }
+	const [
+		userCount,
+		applicationCount,
+		submittedCount,
+		approvedCount,
+		rejectedCount,
+		courseCount,
+		courseApproved,
+		topCourses,
+		topVacancies
+	] = await Promise.all([
+		prisma.user.count(),
+		prisma.application.count(),
+		prisma.application.count({ where: { status: 'SUBMITTED' } }),
+		prisma.application.count({ where: { status: 'APPROVED' } }),
+		prisma.application.count({ where: { status: 'REJECTED' } }),
+		prisma.courseEnrollment.count(),
+		prisma.courseEnrollment.count({ where: { status: 'APPROVED' } }),
+		prisma.course.findMany({
+			include: { _count: { select: { enrollments: true } } },
+			orderBy: { enrollments: { _count: 'desc' } },
+			take: 5
+		}),
+		prisma.vacancy.findMany({
+			include: { _count: { select: { applications: true } } },
+			orderBy: { applications: { _count: 'desc' } },
+			take: 5
+		})
+	])
+
+	let statsText = [
+		'📊 *Umumiy statistika*',
+		'',
+		`👥 Foydalanuvchilar: *${userCount}*`,
+		`📨 Jami arizalar: *${applicationCount}*`,
+		`🆕 Yangi/submitted arizalar: *${submittedCount}*`,
+		`✅ Qabul qilingan arizalar: *${approvedCount}*`,
+		`❌ Rad etilgan arizalar: *${rejectedCount}*`,
+		'',
+		`🎓 Jami kurs yozilishlar: *${courseCount}*`,
+		`✅ Qabul qilingan kurs yozilishlar: *${courseApproved}*`,
+		''
+	].join('\n')
+
+	if (topCourses.length) {
+		statsText += '\n*🏆 Top kurslar:*\n'
+		topCourses.forEach((course, idx) => {
+			statsText += `\n${idx + 1}. ${course.title} — ${course._count.enrollments} ta`
+		})
+		statsText += '\n'
+	}
+
+	if (topVacancies.length) {
+		statsText += '\n*🏆 Top vakansiyalar:*\n'
+		topVacancies.forEach((vacancy, idx) => {
+			statsText += `\n${idx + 1}. ${vacancy.title} — ${vacancy._count.applications} ta`
+		})
+	}
+
+	// Export tugmasi bilan birga chiqaramiz
+	const kb = new InlineKeyboard().text('📥 Excel formatida yuklab olish', 'STATS|EXPORT')
+
+	await replaceBotMessage(ctx, statsText, {
+		parse_mode: 'Markdown',
+		reply_markup: kb
 	})
 
-	if (!vacancies.length) {
-		await ctx.reply('📭 *Faol vakansiyalar topilmadi*', { parse_mode: 'Markdown' })
-		return
+	const upd = await conversation.wait()
+	const data = upd.callbackQuery?.data
+	if (!data) return
+	await upd.answerCallbackQuery().catch(() => {})
+
+	if (data === 'STATS|EXPORT') {
+		await exportStatistics(conversation, ctx)
 	}
+}
 
-	const pickedVacancy = await askChoice(
-		conversation,
-		ctx,
-		'📨 *Qaysi vakansiya arizalarini ko‘rasiz?*',
-		vacancies.map(v => ({ text: v.title, data: `APP_VAC|${v.id}` }))
-	)
+async function exportStatistics(
+	conversation: Conversation<BotContext>,
+	ctx: BotContext
+): Promise<void> {
+	await ctx.reply('⏳ Statistika tayyorlanmoqda...')
 
-	if (!pickedVacancy?.startsWith('APP_VAC|')) return
-	const vacancyId = pickedVacancy.split('|')[1]
-
-	const applications = await prisma.application.findMany({
-		where: { vacancyId, status: 'SUBMITTED' },
-		include: { answers: true, files: true, vacancy: true },
-		orderBy: { submittedAt: 'desc' },
-		take: 20
-	})
-
-	if (!applications.length) {
-		await ctx.reply('📭 Bu vakansiya uchun yuborilgan arizalar yo‘q.')
-		return
-	}
-
-	const pickedApp = await askChoice(
-		conversation,
-		ctx,
-		'📋 *Arizalar ro‘yxati*',
-		applications.map(app => {
-			const fullName = app.answers.find(a => a.fieldKey === 'full_name')?.fieldValue ?? 'Nomaʼlum'
-			return { text: `${fullName} (#${app.id.slice(0, 8)})`, data: `APP_VIEW|${app.id}` }
+	try {
+		// Ma'lumotlarni olish
+		const applications = await prisma.application.findMany({
+			include: {
+				answers: true,
+				files: true,
+				vacancy: true,
+				user: true
+			},
+			orderBy: { createdAt: 'desc' }
 		})
-	)
 
-	if (!pickedApp?.startsWith('APP_VIEW|')) return
-	const applicationId = pickedApp.split('|')[1]
-	const application = applications.find(a => a.id === applicationId)
-	if (!application) return
-
-	const map = new Map(application.answers.map(a => [a.fieldKey, a.fieldValue]))
-	const photo = application.files.find(f => f.type === 'HALF_BODY')
-
-	const text = [
-		`📌 *Vakansiya:* ${application.vacancy?.title ?? '-'}`,
-		'',
-		'👤 *Shaxsiy maʼlumotlar*',
-		`👤 Ism: ${map.get('full_name') ?? '-'}`,
-		`📞 Telefon: ${map.get('phone') ?? '-'}`,
-		'',
-		'❓ *Savollarga javoblar:*'
-	]
-
-	for (const answer of application.answers) {
-		if (!['full_name', 'phone'].includes(answer.fieldKey)) {
-			text.push(`• ${answer.fieldKey}: ${answer.fieldValue}`)
-		}
-	}
-
-	const kb = new InlineKeyboard()
-		.text('✅ Qabul qilish', `AD|APPROVE|${application.id}`)
-		.text('❌ Rad etish', `AD|REJECT|${application.id}`)
-
-	if (photo?.cloudinaryUrl) {
-		await ctx.replyWithPhoto(photo.cloudinaryUrl, {
-			caption: text.join('\n'),
-			parse_mode: 'Markdown',
-			reply_markup: kb
+		const courses = await prisma.courseEnrollment.findMany({
+			include: {
+				course: true,
+				user: true
+			},
+			orderBy: { createdAt: 'desc' }
 		})
-	} else {
-		await ctx.reply(text.join('\n'), {
-			parse_mode: 'Markdown',
-			reply_markup: kb
+
+		// Excel fayl yaratish
+		const buffer = await exportToExcel(applications, courses)
+
+		// Faylni yuborish
+		await ctx.replyWithDocument(new InputFile(buffer, 'statistika.xlsx'), {
+			caption: '📊 Statistika Excel formatida'
 		})
+	} catch (error) {
+		logger.error({ error }, 'Excel export failed')
+		await ctx.reply('❌ Statistika yuklab olishda xatolik yuz berdi.')
 	}
 }
 
@@ -980,211 +1062,13 @@ export async function adminFlow(
 				{ text: '📋 Vakansiyalar ro‘yxati', data: 'A|VAC_LIST' },
 				{ text: '📚 Kurslar ro‘yxati', data: 'A|COURSE_LIST' },
 				{ text: '📨 Arizalar', data: 'A|APP_LIST' },
-				{ text: '📊 Statistika', data: 'A|STATS' },
-				{ text: '🧹 Takroriy vakansiyalarni tozalash', data: 'A|CLEAN_DUPLICATES' }
+				{ text: '📊 Statistika', data: 'A|STATS' }
 			])
 
-			if (!action) return
+			if (!action) continue
 
 			if (action === 'A|STATS') {
-				const [
-					userCount,
-					applicationCount,
-					submittedCount,
-					approvedCount,
-					rejectedCount,
-					courseCount,
-					courseApproved,
-					topCourses,
-					topVacancies
-				]: [
-					number,
-					number,
-					number,
-					number,
-					number,
-					number,
-					number,
-					TopCourseStat[],
-					TopVacancyStat[]
-				] = await Promise.all([
-					prisma.user.count(),
-					prisma.application.count(),
-					prisma.application.count({ where: { status: 'SUBMITTED' } }),
-					prisma.application.count({ where: { status: 'APPROVED' } }),
-					prisma.application.count({ where: { status: 'REJECTED' } }),
-					prisma.courseEnrollment.count(),
-					prisma.courseEnrollment.count({ where: { status: 'APPROVED' } }),
-					prisma.course.findMany({
-						select: {
-							title: true,
-							_count: {
-								select: { enrollments: true }
-							}
-						},
-						orderBy: { enrollments: { _count: 'desc' } },
-						take: 5
-					}),
-					prisma.vacancy.findMany({
-						select: {
-							title: true,
-							_count: {
-								select: { applications: true }
-							}
-						},
-						orderBy: { applications: { _count: 'desc' } },
-						take: 5
-					})
-				])
-
-				let statsText = [
-					'📊 *Umumiy statistika*',
-					'',
-					`👥 Foydalanuvchilar: *${userCount}*`,
-					`📨 Jami arizalar: *${applicationCount}*`,
-					`🆕 Yangi arizalar: *${submittedCount}*`,
-					`✅ Qabul qilingan arizalar: *${approvedCount}*`,
-					`❌ Rad etilgan arizalar: *${rejectedCount}*`,
-					'',
-					`🎓 Jami kurs yozilishlar: *${courseCount}*`,
-					`✅ Qabul qilingan kurs yozilishlar: *${courseApproved}*`
-				].join('\n')
-
-				if (topCourses.length) {
-					statsText += '\n\n*Top kurslar:*'
-					topCourses.forEach((course: TopCourseStat, idx: number) => {
-						statsText += `\n${idx + 1}. ${course.title} — ${course._count.enrollments} ta`
-					})
-				}
-
-				if (topVacancies.length) {
-					statsText += '\n\n*Top vakansiyalar:*'
-					topVacancies.forEach((vacancy: TopVacancyStat, idx: number) => {
-						statsText += `\n${idx + 1}. ${vacancy.title} — ${vacancy._count.applications} ta`
-					})
-				}
-
-				const statsAction = await askChoice(conversation, ctx, statsText, [
-					{ text: '🔄 Yangilash', data: 'A|STATS' },
-					{ text: '⬅️ Orqaga', data: 'A|BACK_ADMIN' }
-				])
-
-				if (statsAction === 'A|BACK_ADMIN' || !statsAction) {
-					continue
-				}
-
-				if (statsAction === 'A|STATS') {
-					continue
-				}
-			}
-
-			if (action === 'A|CLEAN_DUPLICATES') {
-				const duplicates = (await prisma.$queryRaw`
-					SELECT title, COUNT(*) as count
-					FROM vacancies
-					GROUP BY title
-					HAVING COUNT(*) > 1
-				`) as { title: string; count: number }[]
-
-				if (duplicates.length === 0) {
-					await ctx.reply('✅ Takroriy vakansiyalar topilmadi!')
-					continue
-				}
-
-				let text = '🧹 *Takroriy vakansiyalar:*\n\n'
-				duplicates.forEach(d => {
-					text += `• ${d.title} (${d.count} ta)\n`
-				})
-				text += '\n*Nima qilmoqchisiz?*'
-
-				const cleanChoice = await askChoice(conversation, ctx, text, [
-					{ text: '❌ Hammasini oʻchirish', data: 'DELETE_ALL' },
-					{ text: '📋 Koʻrish', data: 'VIEW' },
-					{ text: '⬅️ Orqaga', data: 'BACK' }
-				])
-
-				if (cleanChoice === 'VIEW') {
-					for (const dup of duplicates) {
-						const vacancies = await prisma.vacancy.findMany({
-							where: { title: dup.title },
-							orderBy: { createdAt: 'asc' }
-						})
-
-						let msg = `📌 *${dup.title}* (${dup.count} ta)\n\n`
-						vacancies.forEach((v, idx) => {
-							msg += `${idx + 1}. 🆔 ${v.id.slice(0, 8)} - ${v.salary || 'Maoshsiz'} - ${new Date(
-								v.createdAt
-							).toLocaleDateString()}\n`
-						})
-
-						const dupAction = await askChoice(conversation, ctx, msg, [
-							{
-								text: '🗑 Eng eskisini qoldirib, boshqasini oʻchirish',
-								data: `KEEP_OLD|${dup.title}`
-							},
-							{
-								text: '🗑 Eng yangisini qoldirib, boshqasini oʻchirish',
-								data: `KEEP_NEW|${dup.title}`
-							},
-							{ text: '⬅️ Orqaga', data: 'BACK' }
-						])
-
-						if (dupAction?.startsWith('KEEP_OLD|')) {
-							const title = dupAction.split('|')[1]
-							const sameVacancies = await prisma.vacancy.findMany({
-								where: { title },
-								orderBy: { createdAt: 'asc' }
-							})
-
-							const [, ...toDelete] = sameVacancies
-							await prisma.vacancy.deleteMany({
-								where: { id: { in: toDelete.map(v => v.id) } }
-							})
-
-							await ctx.reply(`✅ ${title} - 1 ta qoldirildi, ${toDelete.length} ta oʻchirildi!`)
-						}
-
-						if (dupAction?.startsWith('KEEP_NEW|')) {
-							const title = dupAction.split('|')[1]
-							const sameVacancies = await prisma.vacancy.findMany({
-								where: { title },
-								orderBy: { createdAt: 'desc' }
-							})
-
-							const [, ...toDelete] = sameVacancies
-							await prisma.vacancy.deleteMany({
-								where: { id: { in: toDelete.map(v => v.id) } }
-							})
-
-							await ctx.reply(`✅ ${title} - 1 ta qoldirildi, ${toDelete.length} ta oʻchirildi!`)
-						}
-					}
-				} else if (cleanChoice === 'DELETE_ALL') {
-					const confirm = await askChoice(
-						conversation,
-						ctx,
-						'⚠️ *Barcha takroriy vakansiyalar oʻchirilsinmi?*',
-						[
-							{ text: '✅ Ha', data: 'YES' },
-							{ text: '❌ Yoʻq', data: 'NO' }
-						]
-					)
-
-					if (confirm === 'YES') {
-						for (const dup of duplicates) {
-							const vacancies = await prisma.vacancy.findMany({
-								where: { title: dup.title },
-								orderBy: { createdAt: 'asc' }
-							})
-							const [, ...toDelete] = vacancies
-							await prisma.vacancy.deleteMany({
-								where: { id: { in: toDelete.map(v => v.id) } }
-							})
-						}
-						await ctx.reply('✅ Takroriy vakansiyalar tozalandi!')
-					}
-				}
-
+				await showStatistics(conversation, ctx)
 				continue
 			}
 
@@ -1199,14 +1083,16 @@ export async function adminFlow(
 			}
 
 			if (action === 'A|APP_LIST') {
-				await manageApplications(conversation, ctx)
+				await ctx.reply('📨 Arizalar boʻlimi ishga tushirilmoqda...')
 				continue
 			}
 
 			if (action === 'A|VAC_ADD') {
+				// Step 1: Vakansiya nomi
 				const title = await askText(conversation, ctx, '📌 *Step 1: Vakansiya nomini kiriting*')
 				if (!title) continue
 
+				// MAVJUD VAKANSIYANI TEKSHIRISH
 				const existingVacancy = await prisma.vacancy.findFirst({
 					where: {
 						title: {
@@ -1233,6 +1119,7 @@ export async function adminFlow(
 					}
 				}
 
+				// Step 2: Maosh so'rash - OPTIONAL
 				const salaryChoice = await askChoice(
 					conversation,
 					ctx,
@@ -1256,14 +1143,15 @@ export async function adminFlow(
 					} else if (salaryValue === 'negotiable') {
 						salary = 'Kelishiladi'
 					} else {
-						salary = `${salaryValue.replace(/_/g, ' ')} soʻm`
+						salary = salaryValue.replace(/_/g, ' ') + ' soʻm'
 					}
 				}
 
+				// Vakansiyani yaratish
 				const vacancy = await prisma.vacancy.create({
 					data: {
 						title,
-						salary,
+						salary: salary,
 						isActive: true
 					}
 				})
@@ -1274,33 +1162,46 @@ export async function adminFlow(
 						: `✅ Vakansiya yaratildi! (ID: ${vacancy.id.slice(0, 8)} - Maosh kiritilmadi)`
 				)
 
-				await ctx.reply('Endi savollar qoʻshamiz.')
+				// Savol qo'shishni so'rash - YANGI QO'SHIMCHA
+				const addQuestion = await askChoice(conversation, ctx, '❓ *Savol qoʻshasizmi?*', [
+					{ text: '✅ Ha', data: 'YES' },
+					{ text: '⏭ Oʻtkazib yuborish', data: 'NO' }
+				])
 
-				let addMore = true
-				while (addMore) {
-					await addVacancyQuestion(conversation, ctx, vacancy.id)
+				if (addQuestion === 'YES') {
+					await ctx.reply('Endi savollar qoʻshamiz.')
 
-					const more = await askChoice(conversation, ctx, 'Yana savol qoʻshasizmi?', [
-						{ text: '➕ Yana savol', data: 'YES' },
-						{ text: '✅ Yetarli', data: 'NO' }
-					])
-					addMore = more === 'YES'
+					let addMore = true
+					while (addMore) {
+						await addVacancyQuestion(conversation, ctx, vacancy.id)
+
+						const more = await askChoice(conversation, ctx, 'Yana savol qoʻshasizmi?', [
+							{ text: '➕ Yana savol', data: 'YES' },
+							{ text: '✅ Yetarli', data: 'NO' }
+						])
+						addMore = more === 'YES'
+					}
+
+					await ctx.reply('✅ Vakansiya va savollar muvaffaqiyatli qoʻshildi!')
+				} else {
+					await ctx.reply('✅ Vakansiya muvaffaqiyatli qoʻshildi! (Savollar qoʻshilmadi)')
 				}
-
-				await ctx.reply('✅ Vakansiya va savollar muvaffaqiyatli qoʻshildi!')
 				continue
 			}
 
 			if (action === 'A|COURSE_ADD') {
+				// Step 1: Kurs nomi
 				const title = await askText(conversation, ctx, '🎓 *Step 1: Kurs nomini kiriting:*')
 				if (!title) continue
 
+				// Step 2: Kurs tavsifi (OPTIONAL)
 				const description = await askText(
 					conversation,
 					ctx,
 					'📝 *Step 2: Kurs tavsifini kiriting:*\n\nAgar tavsif kiritmasangiz, ➖ belgisini yuboring.'
 				)
 
+				// Step 3: Kurs narxi (OPTIONAL)
 				const priceChoice = await askChoice(
 					conversation,
 					ctx,
@@ -1310,6 +1211,7 @@ export async function adminFlow(
 						{ text: '1 000 000 soʻm', data: 'PRICE|1000000' },
 						{ text: '1 500 000 soʻm', data: 'PRICE|1500000' },
 						{ text: '2 000 000 soʻm', data: 'PRICE|2000000' },
+						{ text: 'Bepul', data: 'PRICE|FREE' },
 						{ text: 'Boshqa narx', data: 'PRICE|CUSTOM' },
 						{ text: '⏭ Oʻtkazib yuborish', data: 'PRICE|SKIP' }
 					],
@@ -1323,6 +1225,8 @@ export async function adminFlow(
 
 					if (priceValue === 'SKIP') {
 						price = null
+					} else if (priceValue === 'FREE') {
+						price = 'Bepul'
 					} else if (priceValue === 'CUSTOM') {
 						const customPrice = await askText(
 							conversation,
@@ -1330,12 +1234,13 @@ export async function adminFlow(
 							'💰 *Narxni kiriting:*\n\nMasalan: 750000 yoki 1.2 mln'
 						)
 						const cleanPrice = customPrice.replace(/[^0-9]/g, '')
-						price = cleanPrice ? `${cleanPrice} soʻm` : null
+						price = cleanPrice ? `${parseInt(cleanPrice).toLocaleString()} soʻm` : null
 					} else {
-						price = `${parseInt(priceValue, 10).toLocaleString()} soʻm`
+						price = `${parseInt(priceValue).toLocaleString()} soʻm`
 					}
 				}
 
+				// Kursni yaratish
 				await prisma.course.create({
 					data: {
 						title,
@@ -1354,10 +1259,9 @@ export async function adminFlow(
 			}
 		}
 	} catch (err) {
-		if (isAdminNavSignal(err)) {
+		if (isNavSignal(err)) {
 			if (err.message === 'START') {
-				await ctx.conversation?.exit()
-				await ctx.conversation?.enter('startFlow')
+				await showStartMenu(ctx)
 				return
 			}
 			if (err.message === 'ADMIN') {

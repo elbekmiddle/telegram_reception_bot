@@ -2,396 +2,216 @@ import { type Bot } from 'grammy'
 import { InlineKeyboard } from 'grammy'
 
 import { type BotContext } from '../bot'
-import { adminService } from '../../services/admin.service'
 import { applicationService } from '../../services/application.service'
 import { prisma } from '../../db/prisma'
 import { logger } from '../../utils/logger'
 
-export function setupAdminHandlers(bot: Bot<BotContext>): void {
-	// Kursga yozilishni qabul qilish
-	// bot.callbackQuery(/^CE\|APPROVE\|/, async ctx => {
-	// 	try {
-	// 		await ctx.answerCallbackQuery()
-	// 		const data = ctx.callbackQuery.data
-	// 		if (!data) return
-	// 		const enrollId = data.split('|')[2]
-	// 		const enr = await prisma.courseEnrollment.update({
-	// 			where: { id: enrollId },
-	// 			data: { status: 'APPROVED' }
-	// 		})
-	// 		await ctx.editMessageText('✅ Kursga yozilish qabul qilindi', { parse_mode: 'Markdown' })
-	// 		const user = await prisma.user.findUnique({ where: { id: enr.userId } })
-	// 		if (user) {
-	// 			await ctx.api.sendMessage(
-	// 				Number(user.telegramId),
-	// 				"✅ *Kursga yozilish qabul qilindi!*\n\nTez orada siz bilan bog'lanamiz.",
-	// 				{ parse_mode: 'Markdown' }
-	// 			)
-	// 		}
-	// 	} catch (err) {
-	// 		logger.error({ err }, 'Course enrollment approve failed')
-	// 	}
-	// })
-	// admin.handlers.ts ga qo'shimcha
+function isAdmin(userId?: number): boolean {
+	const admins = [process.env.ADMIN_CHAT_ID, process.env.ADMIN_CHAT_ID_2]
+		.map(v => Number(v || 0))
+		.filter(Boolean)
+	return Boolean(userId && admins.includes(userId))
+}
 
-	// Ariza qabul qilish va xabar yuborish
+function scheduleKeyboard(applicationId: string) {
+	return new InlineKeyboard()
+		.text('📅 Bugun', `SCHEDULE|${applicationId}|TODAY`)
+		.text('📅 Ertaga', `SCHEDULE|${applicationId}|TOMORROW`)
+		.row()
+		.text('📅 3 kundan keyin', `SCHEDULE|${applicationId}|THREE_DAYS`)
+		.text('✍️ Qo‘lda kiritish', `SCHEDULE|${applicationId}|CUSTOM`)
+}
+
+async function sendApplicationApprovedMessage(ctx: BotContext, applicationId: string, text: string) {
+	const application = await prisma.application.findUnique({ where: { id: applicationId } })
+	if (!application) {
+		await ctx.reply('Ariza topilmadi.')
+		return
+	}
+
+	await ctx.api.sendMessage(
+		Number(application.telegramId),
+		`✅ *Arizangiz qabul qilindi!*\n\n${text}`,
+		{ parse_mode: 'Markdown' }
+	)
+}
+
+export async function tryHandleAdminText(ctx: BotContext): Promise<boolean> {
+	if (!isAdmin(ctx.from?.id)) return false
+	if (ctx.session.temp?.waitingFor !== 'custom_schedule') return false
+	const applicationId = ctx.session.temp?.approvedApplicationId
+	const customText = ctx.message?.text?.trim()
+	if (!applicationId || !customText) return false
+
+	try {
+		await sendApplicationApprovedMessage(ctx, applicationId, `Kelish vaqti: *${customText}*`)
+		ctx.session.temp.waitingFor = undefined
+		ctx.session.temp.approvedApplicationId = undefined
+		await ctx.reply('✅ Foydalanuvchiga vaqt yuborildi.')
+		return true
+	} catch (err) {
+		logger.error({ err, applicationId }, 'Failed to send custom schedule message')
+		await ctx.reply('Xatolik yuz berdi.')
+		return true
+	}
+}
+
+export function setupAdminHandlers(bot: Bot<BotContext>): void {
+	bot.callbackQuery(/^CE\|APPROVE\|/, async ctx => {
+		if (!isAdmin(ctx.from?.id)) return
+		try {
+			await ctx.answerCallbackQuery()
+			const enrollmentId = ctx.callbackQuery.data.split('|')[2]
+			const enrollment = await prisma.courseEnrollment.update({
+				where: { id: enrollmentId },
+				data: { status: 'APPROVED' },
+				include: { user: true, course: true }
+			})
+
+			await ctx.editMessageText('✅ Kursga yozilish qabul qilindi.')
+			await ctx.api.sendMessage(
+				Number(enrollment.user.telegramId),
+				`✅ *Kursga yozilish qabul qilindi!*\n\nKurs: *${enrollment.course.title}*`,
+				{ parse_mode: 'Markdown' }
+			)
+		} catch (err) {
+			logger.error({ err }, 'Course enrollment approve failed')
+			await ctx.reply('Xatolik yuz berdi.')
+		}
+	})
+
+	bot.callbackQuery(/^CE\|REJECT\|/, async ctx => {
+		if (!isAdmin(ctx.from?.id)) return
+		try {
+			await ctx.answerCallbackQuery()
+			const enrollmentId = ctx.callbackQuery.data.split('|')[2]
+			const enrollment = await prisma.courseEnrollment.update({
+				where: { id: enrollmentId },
+				data: { status: 'REJECTED' },
+				include: { user: true, course: true }
+			})
+
+			await ctx.editMessageText('❌ Kursga yozilish rad etildi.')
+			await ctx.api.sendMessage(
+				Number(enrollment.user.telegramId),
+				`❌ *Kursga yozilish rad etildi.*\n\nKurs: *${enrollment.course.title}*`,
+				{ parse_mode: 'Markdown' }
+			)
+		} catch (err) {
+			logger.error({ err }, 'Course enrollment reject failed')
+			await ctx.reply('Xatolik yuz berdi.')
+		}
+	})
+
 	bot.callbackQuery(/^AD\|APPROVE\|/, async ctx => {
+		if (!isAdmin(ctx.from?.id)) return
 		try {
 			await ctx.answerCallbackQuery()
 			const applicationId = ctx.callbackQuery.data.split('|')[2]
-
-			const application = await prisma.application.findUnique({
-				where: { id: applicationId },
-				include: { user: true }
-			})
-
-			if (!application) {
-				await ctx.reply('Ariza topilmadi')
-				return
-			}
-
-			// Arizani qabul qilish
 			await prisma.application.update({
 				where: { id: applicationId },
-				data: { status: 'APPROVED' }
+				data: { status: 'APPROVED', reviewedAt: new Date(), reviewedBy: BigInt(ctx.from!.id) }
 			})
 
-			// Arizachiga xabar yuborish uchun tugmalar
-			const userKb = new InlineKeyboard()
-				.text('📅 Bugun', 'SCHEDULE|TODAY')
-				.text('📅 Ertaga', 'SCHEDULE|TOMORROW')
-				.row()
-				.text('📅 3 kundan keyin', 'SCHEDULE|3DAYS')
-				.text('✍️ Qoʻlda kiritish', 'SCHEDULE|CUSTOM')
-
-			await ctx.reply(
-				`✅ Ariza qabul qilindi!\n\nFoydalanuvchiga qachon ish boshlashini tanlang:`,
-				{ reply_markup: userKb }
-			)
-
-			// Sessiyaga saqlash
-			ctx.session.temp = {
-				...ctx.session.temp,
-				approvedApplicationId: applicationId,
-				userTelegramId: application.telegramId.toString()
-			}
+			ctx.session.temp.approvedApplicationId = applicationId
+			ctx.session.temp.waitingFor = undefined
+			await ctx.reply('Foydalanuvchiga yuboriladigan kelish vaqtini tanlang.', {
+				reply_markup: scheduleKeyboard(applicationId)
+			})
 		} catch (err) {
-			logger.error({ err }, 'Approve failed')
+			logger.error({ err }, 'Application approve prompt failed')
+			await ctx.reply('Xatolik yuz berdi.')
 		}
 	})
 
-	// Ish boshlash sanasini tanlash
 	bot.callbackQuery(/^SCHEDULE\|/, async ctx => {
+		if (!isAdmin(ctx.from?.id)) return
 		try {
 			await ctx.answerCallbackQuery()
-			const schedule = ctx.callbackQuery.data.split('|')[1]
-			const { approvedApplicationId, userTelegramId } = ctx.session.temp || {}
+			const [, applicationId, mode] = ctx.callbackQuery.data.split('|')
 
-			if (!approvedApplicationId || !userTelegramId) {
-				await ctx.reply('Xatolik yuz berdi. Qaytadan urinib koʻring.')
+			if (mode === 'CUSTOM') {
+				ctx.session.temp.approvedApplicationId = applicationId
+				ctx.session.temp.waitingFor = 'custom_schedule'
+				await ctx.reply('Kelish vaqtini matn ko‘rinishida yuboring. Masalan: ertaga 10:00 ga keling.')
 				return
 			}
 
-			let startDate = ''
-			const now = new Date()
-
-			switch (schedule) {
-				case 'TODAY':
-					startDate = 'bugun'
-					break
-				case 'TOMORROW':
-					startDate = 'ertaga'
-					break
-				case '3DAYS':
-					startDate = '3 kundan keyin'
-					break
-				case 'CUSTOM':
-					await ctx.reply('✍️ *Ish boshlash sanasini kiriting* (masalan: 2026-03-10):')
-					return // Conversation kerak
+			const textMap: Record<string, string> = {
+				TODAY: 'Kelish vaqti: *bugun*.',
+				TOMORROW: 'Kelish vaqti: *ertaga*.',
+				THREE_DAYS: 'Kelish vaqti: *3 kundan keyin*.'
+			}
+			const text = textMap[mode]
+			if (!text) {
+				await ctx.reply('Noto‘g‘ri tanlov.')
+				return
 			}
 
-			// Foydalanuvchiga xabar yuborish
-			await ctx.api.sendMessage(
-				Number(userTelegramId),
-				`✅ *Arizangiz qabul qilindi!*\n\nIsh boshlash sanasi: *${startDate}*`,
-				{ parse_mode: 'Markdown' }
-			)
-
-			await ctx.reply('✅ Xabar foydalanuvchiga yuborildi!')
+			await sendApplicationApprovedMessage(ctx, applicationId, text)
+			ctx.session.temp.approvedApplicationId = undefined
+			ctx.session.temp.waitingFor = undefined
+			await ctx.reply('✅ Foydalanuvchiga xabar yuborildi.')
 		} catch (err) {
-			logger.error({ err }, 'Schedule failed')
-		}
-	})
-
-	// Kursga yozilishni rad etish
-	bot.callbackQuery(/^CE\|REJECT\|/, async ctx => {
-		try {
-			await ctx.answerCallbackQuery()
-			const data = ctx.callbackQuery.data
-			if (!data) return
-			const enrollId = data.split('|')[2]
-			const enr = await prisma.courseEnrollment.update({
-				where: { id: enrollId },
-				data: { status: 'REJECTED' }
-			})
-			await ctx.editMessageText('❌ Kursga yozilish rad etildi', { parse_mode: 'Markdown' })
-			const user = await prisma.user.findUnique({ where: { id: enr.userId } })
-			if (user) {
-				await ctx.api.sendMessage(
-					Number(user.telegramId),
-					'❌ *Kursga yozilish rad etildi.*\n\n/ start orqali boshqa kursni tanlashingiz mumkin.',
-					{ parse_mode: 'Markdown' }
-				)
-			}
-		} catch (err) {
-			logger.error({ err }, 'Course enrollment reject failed')
-		}
-	})
-
-	// Ariza qabul qilish (APPROVE)
-	bot.callbackQuery(/^AD\|APPROVE\|/, async ctx => {
-		try {
-			await ctx.answerCallbackQuery()
-			const data = ctx.callbackQuery.data
-			if (!data) return
-
-			const parts = data.split('|')
-			const applicationId = parts[2]
-
-			// Arizani qabul qilish
-			await adminService.approve(ctx, applicationId)
-
-			// Arizachiga xabar yuborish
-			const application = await applicationService.getById(applicationId)
-			if (application) {
-				await ctx.api.sendMessage(
-					Number(application.telegramId),
-					"✅ *Arizangiz qabul qilindi!*\n\nTez orada siz bilan bog'lanamiz.",
-					{ parse_mode: 'Markdown' }
-				)
-			}
-
-			// Admin xabarini yangilash
-			await ctx.editMessageText(`✅ Ariza #${applicationId.slice(0, 8)} qabul qilindi`, {
-				parse_mode: 'Markdown'
-			})
-		} catch (err) {
-			logger.error({ err }, 'Admin approve failed')
+			logger.error({ err }, 'Schedule callback failed')
 			await ctx.reply('Xatolik yuz berdi.')
 		}
 	})
 
-	// Ariza rad etish (REJECT) - sabab so'rash
 	bot.callbackQuery(/^AD\|REJECT\|/, async ctx => {
+		if (!isAdmin(ctx.from?.id)) return
 		try {
 			await ctx.answerCallbackQuery()
-			const data = ctx.callbackQuery.data
-			if (!data) return
-
-			const parts = data.split('|')
-			const applicationId = parts[2]
-
-			// Rad etish sababini so'rash
-			await adminService.askRejectReason(ctx, applicationId)
-		} catch (err) {
-			logger.error({ err }, 'Admin reject prompt failed')
-			await ctx.reply('Xatolik yuz berdi.')
-		}
-	})
-
-	// Rad etish sababi bilan arizani rad etish
-	bot.callbackQuery(/^AD\|REJ_R\|/, async ctx => {
-		try {
-			await ctx.answerCallbackQuery()
-			const data = ctx.callbackQuery.data
-			if (!data) return
-
-			const parts = data.split('|')
-			const applicationId = parts[2]
-			const reason = decodeURIComponent(parts[3]) // Sababni dekodlash
-
-			// Arizani rad etish
-			await adminService.reject(ctx, applicationId, reason)
-
-			// Arizachiga xabar yuborish
-			const application = await applicationService.getById(applicationId)
-			if (application) {
-				await ctx.api.sendMessage(
-					Number(application.telegramId),
-					`❌ *Arizangiz rad etildi!*\n\nSabab: ${reason}\n\nBoshqa vakansiyalarga topshirishingiz mumkin.`,
-					{ parse_mode: 'Markdown' }
-				)
-			}
-
-			// Admin xabarini yangilash
-			await ctx.editMessageText(
-				`❌ Ariza #${applicationId.slice(0, 8)} rad etildi\nSabab: ${reason}`,
-				{ parse_mode: 'Markdown' }
-			)
-		} catch (err) {
-			logger.error({ err }, 'Admin reject failed')
-			await ctx.reply('Xatolik yuz berdi.')
-		}
-	})
-
-	// Foydalanuvchi bilan bog'lanish (CONTACT)
-	bot.callbackQuery(/^AD\|CONTACT\|/, async ctx => {
-		try {
-			await ctx.answerCallbackQuery()
-			const data = ctx.callbackQuery.data
-			if (!data) return
-
-			const parts = data.split('|')
-			const telegramId = parts[2]
-
-			// Foydalanuvchi profiliga link yuborish
-			await ctx.reply(`📱 Foydalanuvchi profili: tg://user?id=${telegramId}`)
-		} catch (err) {
-			logger.error({ err }, 'Admin contact failed')
-		}
-	})
-
-	// Ariza ma'lumotlarini ko'rish (VIEW)
-	bot.callbackQuery(/^AD\|VIEW\|/, async ctx => {
-		try {
-			await ctx.answerCallbackQuery()
-			const data = ctx.callbackQuery.data
-			if (!data) return
-
-			const parts = data.split('|')
-			const applicationId = parts[2]
-
-			// Ariza ma'lumotlarini olish
-			const application = await applicationService.getById(applicationId)
-			if (!application) {
-				await ctx.reply('Ariza topilmadi.')
-				return
-			}
-
-			// Ariza ma'lumotlarini formatlash
-			let message = `📋 *Ariza #${applicationId.slice(0, 8)}*\n\n`
-			message += `👤 *Telegram ID:* ${application.telegramId}\n`
-			message += `📅 *Yaratilgan:* ${new Date(application.createdAt).toLocaleString('uz-UZ')}\n`
-			message += `📊 *Holat:* ${application.status}\n`
-
-			if (application.submittedAt) {
-				message += `📤 *Topshirilgan:* ${new Date(application.submittedAt).toLocaleString(
-					'uz-UZ'
-				)}\n`
-			}
-
-			// Javoblarni qo'shish
-			if (application.answers && application.answers.length > 0) {
-				message += '\n*📝 Javoblar:*\n'
-				for (const answer of application.answers) {
-					message += `• ${answer.fieldKey}: ${answer.fieldValue}\n`
-				}
-			}
-
+			const applicationId = ctx.callbackQuery.data.split('|')[2]
 			const kb = new InlineKeyboard()
-				.text('✅ Qabul qilish', `AD|APPROVE|${applicationId}`)
-				.text('❌ Rad etish', `AD|REJECT|${applicationId}`)
+				.text('Tajriba yetarli emas', `AD|REJ_R|${applicationId}|NO_EXP`)
 				.row()
-				.text("📞 Bog'lanish", `AD|CONTACT|${application.telegramId}`)
-
-			await ctx.reply(message, {
-				parse_mode: 'Markdown',
-				reply_markup: kb
-			})
+				.text('Muloqot past', `AD|REJ_R|${applicationId}|WEAK_COMM`)
+				.row()
+				.text('Hujjat yetishmaydi', `AD|REJ_R|${applicationId}|DOCS_MISSING`)
+				.row()
+				.text('Boshqa', `AD|REJ_R|${applicationId}|OTHER`)
+			await ctx.reply('Rad etish sababini tanlang.', { reply_markup: kb })
 		} catch (err) {
-			logger.error({ err }, 'Admin view failed')
+			logger.error({ err }, 'Reject prompt failed')
+			await ctx.reply('Xatolik yuz berdi.')
 		}
 	})
 
-	// Rad etish sababini tanlash uchun tugmalar
-	bot.callbackQuery(/^AD\|REASON\|/, async ctx => {
+	bot.callbackQuery(/^AD\|REJ_R\|/, async ctx => {
+		if (!isAdmin(ctx.from?.id)) return
 		try {
 			await ctx.answerCallbackQuery()
-			const data = ctx.callbackQuery.data
-			if (!data) return
-
-			const parts = data.split('|')
-			const applicationId = parts[2]
-			const reasonKey = parts[3]
-
-			let reason = ''
-			switch (reasonKey) {
-				case 'EXPERIENCE':
-					reason = 'Tajriba yetarli emas'
-					break
-				case 'EDUCATION':
-					reason = "Ma'lumot mos kelmadi"
-					break
-				case 'AGE':
-					reason = 'Yosh cheklovi'
-					break
-				case 'LANGUAGE':
-					reason = 'Til bilish darajasi yetarli emas'
-					break
-				case 'OTHER':
-					reason = 'Boshqa sabab'
-					break
-				default:
-					reason = reasonKey
+			const [, , applicationId, reasonCode] = ctx.callbackQuery.data.split('|')
+			const reasonMap: Record<string, string> = {
+				NO_EXP: 'Tajriba yetarli emas',
+				WEAK_COMM: 'Muloqot qobiliyati past',
+				DOCS_MISSING: 'Hujjatlar yetishmaydi',
+				OTHER: 'Boshqa sabab'
 			}
+			const reason = reasonMap[reasonCode] ?? 'Boshqa sabab'
+			await prisma.application.update({
+				where: { id: applicationId },
+				data: {
+					status: 'REJECTED',
+					reviewedAt: new Date(),
+					reviewedBy: BigInt(ctx.from!.id),
+					rejectionReason: reason
+				}
+			})
 
-			// Rad etish sababi bilan arizani rad etish
-			await adminService.reject(ctx, applicationId, reason)
-
-			// Arizachiga xabar yuborish
 			const application = await applicationService.getById(applicationId)
 			if (application) {
 				await ctx.api.sendMessage(
 					Number(application.telegramId),
-					`❌ *Arizangiz rad etildi!*\n\nSabab: ${reason}\n\nBoshqa vakansiyalarga topshirishingiz mumkin.`,
+					`❌ *Arizangiz rad etildi.*\n\nSabab: ${reason}`,
 					{ parse_mode: 'Markdown' }
 				)
 			}
-
-			// Admin xabarini yangilash
-			await ctx.editMessageText(
-				`❌ Ariza #${applicationId.slice(0, 8)} rad etildi\nSabab: ${reason}`,
-				{ parse_mode: 'Markdown' }
-			)
+			await ctx.editMessageText(`❌ Ariza rad etildi.\nSabab: ${reason}`)
 		} catch (err) {
-			logger.error({ err }, 'Admin reason failed')
-		}
-	})
-
-	// Barcha arizalar ro'yxati
-	bot.callbackQuery('AD|LIST_ALL', async ctx => {
-		try {
-			await ctx.answerCallbackQuery()
-
-			const applications = await applicationService.getAll({
-				status: 'SUBMITTED',
-				orderBy: { submittedAt: 'desc' },
-				take: 10
-			})
-
-			if (!applications.length) {
-				await ctx.reply('📭 Yangi arizalar mavjud emas.')
-				return
-			}
-
-			let message = '*📋 Yangi arizalar roʻyxati*\n\n'
-			const kb = new InlineKeyboard()
-
-			for (let i = 0; i < applications.length; i++) {
-				const app = applications[i]
-				message += `${i + 1}. 🆔 #${app.id.slice(0, 8)}\n`
-				message += `   📅 ${new Date(app.submittedAt!).toLocaleString('uz-UZ')}\n\n`
-
-				kb.text(`Ariza #${i + 1}`, `AD|VIEW|${app.id}`)
-				if ((i + 1) % 2 === 0) kb.row()
-			}
-
-			await ctx.reply(message, {
-				parse_mode: 'Markdown',
-				reply_markup: kb
-			})
-		} catch (err) {
-			logger.error({ err }, 'Admin list all failed')
+			logger.error({ err }, 'Reject handler failed')
+			await ctx.reply('Xatolik yuz berdi.')
 		}
 	})
 }

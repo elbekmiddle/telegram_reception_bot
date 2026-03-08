@@ -1,5 +1,5 @@
 import { prisma } from '../db/prisma'
-import type { QuestionType } from '@prisma/client'
+type QuestionType = 'TEXT' | 'SINGLE_SELECT' | 'MULTI_SELECT'
 
 export interface CreateVacancyData {
 	title: string

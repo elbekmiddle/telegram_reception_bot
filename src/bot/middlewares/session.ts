@@ -13,7 +13,13 @@ const initialSessionData = (): SessionData => ({
 export const sessionMiddleware = session<SessionData, Context>({
 	initial: initialSessionData,
 	getSessionKey: ctx => {
-		// Must always return a string (grammY types expect string, not undefined)
-		return ctx.from?.id?.toString() ?? ctx.chat?.id?.toString() ?? 'anonymous'
+		const userId = ctx.from?.id?.toString()
+		const chatId = ctx.chat?.id?.toString()
+		if (userId) return `user:${userId}`
+		if (chatId) return `chat:${chatId}`
+		if ('callback_query' in ctx.update && ctx.update.callback_query?.id) {
+			return `cb:${ctx.update.callback_query.id}`
+		}
+		return `upd:${ctx.update.update_id}`
 	}
 })

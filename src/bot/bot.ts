@@ -2,7 +2,7 @@ import { Bot, Context as GrammyContext, type MiddlewareFn } from 'grammy'
 import { conversations, createConversation, type ConversationFlavor } from '@grammyjs/conversations'
 import { type SessionFlavor } from 'grammy'
 import express, { Request, Response } from 'express'
-import { sequentialize } from '@grammyjs/runner'
+
 import { env } from '../config/env'
 import { logger } from '../utils/logger'
 import { sessionMiddleware } from './middlewares/session'
@@ -39,26 +39,14 @@ export const bot = new Bot<BotContext>(env.BOT_TOKEN)
 setDirectBot(bot)
 
 // MUHIM ORDER:
-// 1. State
-// 2. Session
-// 3. Sequentialize (ENG MUHIM!)
-// 4. Conversations
-// 5. Rate limit
-// 6. Auth
-// 7. Commands va Handlers
+// 1. Session
+// 2. Conversations
+// 3. Rate limit (callbacklarni o'tkazib yuborish kerak)
+// 4. Auth
+// 5. Commands va Handlers
 
 bot.use(stateMiddleware)
 bot.use(sessionMiddleware)
-
-// Sequentialize middleware - BIR CHAT UCHUN UPDATE'LARNI KETMA-KET ISHLAYDI
-bot.use(
-	sequentialize((ctx: BotContext) => {
-		// Har bir chat/user uchun unique key
-		const key = String(ctx.chat?.id ?? ctx.from?.id ?? ctx.update.update_id)
-		logger.debug({ key }, 'Sequentialize key')
-		return key
-	})
-)
 
 // Conversations plugin
 bot.use(conversations())
@@ -79,7 +67,10 @@ setupCommands(bot)
 setupHandlers(bot)
 
 // Start menu buttons (Vacancy / Courses)
-bot.callbackQuery(/^START\|(VAC|COURSE)$/, handleStartChoice)
+bot.callbackQuery(
+	/^(START\|(VAC|COURSE|ADMIN)|user_courses|user_vacancies|user_back_main)$/,
+	handleStartChoice
+)
 setupAdminHandlers(bot)
 
 bot.catch(err => {

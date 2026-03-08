@@ -1,88 +1,102 @@
 import type { Conversation } from '@grammyjs/conversations'
 import { InlineKeyboard, Keyboard } from 'grammy'
 import type { BotContext } from '../bot'
-import { logger } from '../../utils/logger'
-export type NavSignal = 'BACK' | 'CANCEL' | 'SKIP' | 'START' | 'ADMIN' | 'TIMEOUT'
 
-export const navError = (sig: NavSignal) => new Error(sig)
+export type NavSignal = 'BACK' | 'CANCEL' | 'SKIP' | 'START' | 'ADMIN'
 
-export function isNavSignal(err: unknown): err is Error {
-	return (
-		err instanceof Error &&
-		['BACK', 'CANCEL', 'SKIP', 'START', 'ADMIN', 'TIMEOUT'].includes(err.message)
+type StartIntent = 'START' | 'ADMIN' | 'CANCEL'
+
+/**
+ * Joriy jarayonni to'xtatishni tasdiqlash
+ */
+async function confirmProcessInterrupt(
+	conversation: Conversation<BotContext>,
+	ctx: BotContext,
+	intent: StartIntent,
+	restore: () => Promise<void>
+): Promise<StartIntent | null> {
+	const titleMap: Record<StartIntent, string> = {
+		START: '🏠 Bosh menyuga qaytmoqchimisiz?',
+		ADMIN: '👨‍💼 Admin panelga o‘tmoqchimisiz?',
+		CANCEL: '❌ Joriy jarayonni bekor qilmoqchimisiz?'
+	}
+
+	const kb = new InlineKeyboard()
+		.text('✅ Ha', `INTERRUPT|${intent}|YES`)
+		.text('↩️ Yo‘q', `INTERRUPT|${intent}|NO`)
+
+	await replaceBotMessage(
+		ctx,
+		`${titleMap[intent]}
+
+Joriy kiritishlar yo‘qoladi.`,
+		{
+			parse_mode: 'Markdown',
+			reply_markup: kb
+		}
 	)
-}
-const DEFAULT_WAIT_MS = 5 * 60 * 1000 // 5 min
 
-async function waitWithTimeout<T>(promise: Promise<T>, ms = DEFAULT_WAIT_MS): Promise<T> {
-	let timer: NodeJS.Timeout | undefined
+	while (true) {
+		const upd = await conversation.wait()
+		if (upd.callbackQuery?.data) {
+			const data = upd.callbackQuery.data
+			await upd.answerCallbackQuery().catch(() => {})
+			if (data === `INTERRUPT|${intent}|YES`) return intent
+			if (data === `INTERRUPT|${intent}|NO`) {
+				await restore()
+				return null
+			}
+			continue
+		}
 
-	const timeoutPromise = new Promise<never>((_, reject) => {
-timer = setTimeout(() => reject(navError('CANCEL')), ms)	})
-
-	try {
-		return await Promise.race([promise, timeoutPromise])
-	} finally {
-		if (timer) clearTimeout(timer)
+		const text = upd.message?.text?.trim()
+		if (text === '/start') {
+			intent = 'START'
+			return await confirmProcessInterrupt(conversation, ctx, intent, restore)
+		}
+		if (text === '/admin') {
+			intent = 'ADMIN'
+			return await confirmProcessInterrupt(conversation, ctx, intent, restore)
+		}
+		if (text === '/cancel') {
+			intent = 'CANCEL'
+			return await confirmProcessInterrupt(conversation, ctx, intent, restore)
+		}
 	}
 }
 
-function getUpdateId(upd: any): number {
-	return Number(upd?.update?.update_id ?? upd?.updateId ?? 0)
-}
-
-function getLastConsumedUpdateId(ctx: BotContext): number {
-	return Number((ctx.session.temp as any)?.lastConsumedUpdateId ?? 0)
-}
-
-function setLastConsumedUpdateId(ctx: BotContext, upd: any) {
-	ctx.session.temp ??= {} as any
-	;(ctx.session.temp as any).lastConsumedUpdateId = getUpdateId(upd)
-}
-
-function isFreshUpdate(ctx: BotContext, upd: any): boolean {
-	const current = getUpdateId(upd)
-	const last = getLastConsumedUpdateId(ctx)
-	return current > last
-}
-
-function isSameActor(ctx: BotContext, upd: any): boolean {
-	const expectedUserId = ctx.from?.id
-	const expectedChatId = ctx.chat?.id
-
-	if (expectedUserId && upd.from?.id && upd.from.id !== expectedUserId) return false
-	if (expectedChatId && upd.chat?.id && upd.chat.id !== expectedChatId) return false
-	if (expectedChatId && upd.message?.chat?.id && upd.message.chat.id !== expectedChatId)
-		return false
-	if (
-		expectedChatId &&
-		upd.callbackQuery?.message?.chat?.id &&
-		upd.callbackQuery.message.chat.id !== expectedChatId
-	) {
-		return false
-	}
-
+/**
+ * Interrupt komandalarini handle qilish
+ */
+async function handleInterruptCommand(
+	conversation: Conversation<BotContext>,
+	ctx: BotContext,
+	text: string,
+	restore: () => Promise<void>
+): Promise<boolean> {
+	if (text !== '/start' && text !== '/admin' && text !== '/cancel') return false
+	const intent = text === '/start' ? 'START' : text === '/admin' ? 'ADMIN' : 'CANCEL'
+	const confirmed = await confirmProcessInterrupt(conversation, ctx, intent, restore)
+	if (confirmed === 'START') throw navError('START')
+	if (confirmed === 'ADMIN') throw navError('ADMIN')
+	if (confirmed === 'CANCEL') throw navError('CANCEL')
 	return true
 }
 
-async function safeWait(conversation: Conversation<BotContext>, ms = DEFAULT_WAIT_MS) {
-	return await waitWithTimeout(conversation.wait(), ms)
+/**
+ * Navigatsiya xatoligi yaratish
+ */
+export const navError = (sig: NavSignal) => new Error(sig)
+
+/**
+ * Navigatsiya xatoligini tekshirish
+ */
+export function isNavSignal(err: unknown): err is Error {
+	return err instanceof Error && ['BACK', 'CANCEL', 'SKIP', 'START', 'ADMIN'].includes(err.message)
 }
 
-async function replySoft(
-	ctx: BotContext,
-	text: string,
-	options?: Parameters<BotContext['reply']>[1]
-) {
-	try {
-		return await ctx.reply(text, options)
-	} catch (err) {
-		logger.warn({ err }, 'replySoft failed')
-		return null
-	}
-}
 /**
- * Delete previous bot message
+ * Oldingi bot xabarini o'chirish
  */
 export async function deletePrevBotMessage(ctx: BotContext) {
 	const msgId = ctx.session.lastBotMessageId
@@ -91,12 +105,12 @@ export async function deletePrevBotMessage(ctx: BotContext) {
 	try {
 		await ctx.api.deleteMessage(chatId, msgId)
 	} catch {
-		// ignore
+		// ignore - xabar allaqachon o'chirilgan bo'lishi mumkin
 	}
 }
 
 /**
- * Replace bot message (delete old, send new)
+ * Bot xabarini almashtirish (eskisini o'chirib, yangisini yuborish)
  */
 export async function replaceBotMessage(
 	ctx: BotContext,
@@ -110,7 +124,7 @@ export async function replaceBotMessage(
 }
 
 /**
- * Build inline keyboard
+ * Inline keyboard yaratish
  */
 export function buildInlineKb(
 	buttons: { text: string; data: string }[],
@@ -119,7 +133,7 @@ export function buildInlineKb(
 	const kb = new InlineKeyboard()
 	const cols = opts?.columns ?? 2
 
-	// Main buttons
+	// Asosiy tugmalar
 	for (let i = 0; i < buttons.length; i++) {
 		kb.text(buttons[i].text, buttons[i].data)
 		if ((i + 1) % cols === 0 && i !== buttons.length - 1) {
@@ -131,7 +145,7 @@ export function buildInlineKb(
 		kb.row()
 	}
 
-	// Navigation buttons
+	// Navigatsiya tugmalari
 	if (opts?.skip) {
 		kb.text('⏭ O`tkazib yuborish', 'NAV|SKIP')
 		kb.row()
@@ -147,126 +161,34 @@ export function buildInlineKb(
 	return kb
 }
 
-// export async function askText(
-// 	conversation: Conversation<BotContext>,
-// 	ctx: BotContext,
-// 	question: string,
-// 	opts?: {
-// 		back?: boolean
-// 		cancel?: boolean
-// 		skip?: boolean
-// 		validate?: (value: string) => string | null
-// 	}
-// ): Promise<string> {
-// 	const navKb = opts?.back || opts?.cancel || opts?.skip ? buildInlineKb([], opts) : undefined
-
-// 	const sent = await replaceBotMessage(
-// 		ctx,
-// 		question,
-// 		navKb ? { parse_mode: 'Markdown', reply_markup: navKb } : { parse_mode: 'Markdown' }
-// 	)
-
-// 	const promptMessageId = sent.message_id
-
-// 	while (true) {
-// 		const upd = await safeWait(conversation)
-
-// 		if (!isSameActor(ctx, upd)) continue
-
-// 		if (upd.callbackQuery) {
-// 			const data = upd.callbackQuery.data
-// 			if (!data) continue
-
-// 			await upd.answerCallbackQuery().catch(() => {})
-
-// 			if (data === 'NAV|BACK') throw navError('BACK')
-// 			if (data === 'NAV|CANCEL') throw navError('CANCEL')
-// 			if (data === 'NAV|SKIP') throw navError('SKIP')
-
-// 			continue
-// 		}
-
-// 		const msg = upd.message
-// 		if (!msg?.text) continue
-
-// 		// Eski queued xabarlarni kesish
-// 		if (msg.message_id <= promptMessageId) {
-// 			logger.warn(
-// 				{
-// 					text: msg.text,
-// 					msgMessageId: msg.message_id,
-// 					promptMessageId
-// 				},
-// 				'Ignoring stale text update in askText by message_id'
-// 			)
-// 			continue
-// 		}
-
-// 		const text = msg.text.trim()
-// 		if (!text) continue
-
-// 		if (text === '/start') throw navError('START')
-// 		if (text === '/admin') throw navError('ADMIN')
-// 		if (text === '/cancel') throw navError('CANCEL')
-// 		if (text === '⬅️ Orqaga') throw navError('BACK')
-// 		if (text === '❌ Bekor qilish') throw navError('CANCEL')
-
-// 		if (opts?.validate) {
-// 			const validationError = opts.validate(text)
-// 			if (validationError) {
-// 				await ctx.reply(validationError, {
-// 					parse_mode: 'Markdown',
-// 					reply_markup: navKb
-// 				})
-// 				continue
-// 			}
-// 		}
-
-// 		return text
-// 	}
-// }
+/**
+ * Matn kiritishni so'rash
+ */
 export async function askText(
 	conversation: Conversation<BotContext>,
 	ctx: BotContext,
 	question: string,
-	opts?: {
-		back?: boolean
-		cancel?: boolean
-		skip?: boolean
-		validate?: (value: string) => string | null
-	}
+	opts?: { back?: boolean; cancel?: boolean; skip?: boolean }
 ): Promise<string> {
 	const navKb = opts?.back || opts?.cancel || opts?.skip ? buildInlineKb([], opts) : undefined
 
-	await replaceBotMessage(
-		ctx,
-		question,
-		navKb ? { parse_mode: 'Markdown', reply_markup: navKb } : { parse_mode: 'Markdown' }
-	)
+	const renderQuestion = async () =>
+		await replaceBotMessage(
+			ctx,
+			question,
+			navKb ? { parse_mode: 'Markdown', reply_markup: navKb } : { parse_mode: 'Markdown' }
+		)
+
+	await renderQuestion()
 
 	while (true) {
-		const upd = await safeWait(conversation)
-
-		if (!isSameActor(ctx, upd)) continue
-		if (!isFreshUpdate(ctx, upd)) {
-			logger.warn(
-				{
-					updateId: getUpdateId(upd),
-					lastConsumedUpdateId: getLastConsumedUpdateId(ctx),
-					text: upd.message?.text
-				},
-				'Ignoring stale update in askText by update_id'
-			)
-			continue
-		}
+		const upd = await conversation.wait()
 
 		if (upd.callbackQuery) {
 			const data = upd.callbackQuery.data
 			if (!data) continue
 
 			await upd.answerCallbackQuery().catch(() => {})
-
-			setLastConsumedUpdateId(ctx, upd)
 
 			if (data === 'NAV|BACK') throw navError('BACK')
 			if (data === 'NAV|CANCEL') throw navError('CANCEL')
@@ -275,34 +197,21 @@ export async function askText(
 			continue
 		}
 
-		const msg = upd.message
-		if (!msg?.text) continue
+		const text = upd.message?.text?.trim()
+		if (text) {
+			const interrupted = await handleInterruptCommand(conversation, ctx, text, renderQuestion)
+			if (interrupted) continue
 
-		const text = msg.text.trim()
-		if (!text) continue
-
-		setLastConsumedUpdateId(ctx, upd)
-
-		if (text === '/start') throw navError('START')
-		if (text === '/admin') throw navError('ADMIN')
-		if (text === '/cancel') throw navError('CANCEL')
-		if (text === '⬅️ Orqaga') throw navError('BACK')
-		if (text === '❌ Bekor qilish') throw navError('CANCEL')
-
-		if (opts?.validate) {
-			const validationError = opts.validate(text)
-			if (validationError) {
-				await ctx.reply(validationError, {
-					parse_mode: 'Markdown',
-					reply_markup: navKb
-				})
-				continue
-			}
+			return text
 		}
 
-		return text
+		await replaceBotMessage(ctx, 'Iltimos, matn yuboring ✍️')
 	}
 }
+
+/**
+ * Tanlov so'rash (Inline keyboard orqali)
+ */
 export async function askChoice(
 	conversation: Conversation<BotContext>,
 	ctx: BotContext,
@@ -317,115 +226,50 @@ export async function askChoice(
 	if (opts?.skip) allowedData.add('NAV|SKIP')
 
 	const kb = buildInlineKb(buttons, opts)
+	const renderQuestion = async () =>
+		await replaceBotMessage(ctx, question, {
+			parse_mode: 'Markdown',
+			reply_markup: kb
+		})
 
-	await replaceBotMessage(ctx, question, {
-		parse_mode: 'Markdown',
-		reply_markup: kb
-	})
+	await renderQuestion()
 
 	while (true) {
-		const upd = await safeWait(conversation)
-
-		if (!isSameActor(ctx, upd)) continue
-		if (!isFreshUpdate(ctx, upd)) continue
+		const upd = await conversation.wait()
 
 		if (upd.callbackQuery) {
 			const data = upd.callbackQuery.data
 			if (!data) continue
 
 			await upd.answerCallbackQuery().catch(() => {})
-			setLastConsumedUpdateId(ctx, upd)
 
 			if (data === 'NAV|BACK') return null
 			if (data === 'NAV|CANCEL') throw navError('CANCEL')
 			if (data === 'NAV|SKIP') throw navError('SKIP')
 
-			if (!allowedData.has(data)) continue
+			if (!allowedData.has(data)) {
+				continue
+			}
 
 			return data
 		}
 
 		const text = upd.message?.text?.trim()
 		if (text) {
-			setLastConsumedUpdateId(ctx, upd)
+			const interrupted = await handleInterruptCommand(conversation, ctx, text, renderQuestion)
+			if (interrupted) continue
 
-			if (text === '/start') throw navError('START')
-			if (text === '/admin') throw navError('ADMIN')
-			if (text === '/cancel') throw navError('CANCEL')
-
-			await ctx.reply('Iltimos, quyidagi tugmalardan birini tanlang 👇', {
+			await replaceBotMessage(ctx, 'Iltimos, quyidagi tugmalardan birini tanlang 👇', {
 				parse_mode: 'Markdown',
 				reply_markup: kb
 			})
 		}
 	}
 }
-// export async function askPhone(
-// 	conversation: Conversation<BotContext>,
-// 	ctx: BotContext,
-// 	question: string,
-// 	opts?: { back?: boolean; cancel?: boolean }
-// ): Promise<string> {
-// 	const replyKeyboard = new Keyboard().requestContact('📱 Telefon raqamni yuborish').row()
 
-// 	if (opts?.back) {
-// 		replyKeyboard.text('⬅️ Orqaga')
-// 	}
-// 	if (opts?.cancel) {
-// 		replyKeyboard.text('❌ Bekor qilish')
-// 	}
-
-// 	replyKeyboard.resized().oneTime()
-
-// 	await replaceBotMessage(ctx, question, {
-// 		parse_mode: 'Markdown',
-// 		reply_markup: replyKeyboard
-// 	})
-
-// 	while (true) {
-// 		const upd = await conversation.wait()
-
-// 		if (upd.callbackQuery) {
-// 			const data = upd.callbackQuery.data
-// 			if (!data) continue
-
-// 			await upd.answerCallbackQuery().catch(() => {})
-
-// 			if (data === 'NAV|BACK') throw navError('BACK')
-// 			if (data === 'NAV|CANCEL') throw navError('CANCEL')
-// 			continue
-// 		}
-
-// 		if (upd.message?.contact) {
-// 			const phoneNumber = upd.message.contact.phone_number
-// 			const clean = phoneNumber.replace(/\D/g, '')
-// 			return clean.startsWith('998') ? `+${clean}` : `+${clean}`
-// 		}
-
-// 		const text = upd.message?.text?.trim()
-// 		if (text) {
-// 			if (text === '/start') throw navError('START')
-// 			if (text === '/admin') throw navError('ADMIN')
-// 			if (text === '/cancel') throw navError('CANCEL')
-// 			if (text === '⬅️ Orqaga') throw navError('BACK')
-// 			if (text === '❌ Bekor qilish') throw navError('CANCEL')
-
-// 			const cleaned = text.replace(/[^\d+]/g, '')
-// 			if (!/^\+?\d{9,15}$/.test(cleaned)) {
-// 				await replaceBotMessage(
-// 					ctx,
-// 					'📞 Telefon raqamni to‘g‘ri kiriting.\n\nMasalan: +998901234567'
-// 				)
-// 				continue
-// 			}
-
-// 			return cleaned.startsWith('+') ? cleaned : `+${cleaned}`
-// 		}
-
-// 		await replaceBotMessage(ctx, 'Iltimos, telefon raqamingizni yozing yoki tugmani bosing 📱')
-// 	}
-// }
-
+/**
+ * Telefon raqam so'rash (kontakt tugmasi bilan)
+ */
 export async function askPhone(
 	conversation: Conversation<BotContext>,
 	ctx: BotContext,
@@ -434,28 +278,31 @@ export async function askPhone(
 ): Promise<string> {
 	const replyKeyboard = new Keyboard().requestContact('📱 Telefon raqamni yuborish').row()
 
-	if (opts?.back) replyKeyboard.text('⬅️ Orqaga')
-	if (opts?.cancel) replyKeyboard.text('❌ Bekor qilish')
+	if (opts?.back) {
+		replyKeyboard.text('⬅️ Orqaga').row()
+	}
+	if (opts?.cancel) {
+		replyKeyboard.text('❌ Bekor qilish').row()
+	}
 
 	replyKeyboard.resized().oneTime()
 
-	await replaceBotMessage(ctx, question, {
-		parse_mode: 'Markdown',
-		reply_markup: replyKeyboard
-	})
+	const renderQuestion = async () =>
+		await replaceBotMessage(ctx, question, {
+			parse_mode: 'Markdown',
+			reply_markup: replyKeyboard
+		})
+
+	await renderQuestion()
 
 	while (true) {
-		const upd = await safeWait(conversation)
-
-		if (!isSameActor(ctx, upd)) continue
-		if (!isFreshUpdate(ctx, upd)) continue
+		const upd = await conversation.wait()
 
 		if (upd.callbackQuery) {
 			const data = upd.callbackQuery.data
 			if (!data) continue
 
 			await upd.answerCallbackQuery().catch(() => {})
-			setLastConsumedUpdateId(ctx, upd)
 
 			if (data === 'NAV|BACK') throw navError('BACK')
 			if (data === 'NAV|CANCEL') throw navError('CANCEL')
@@ -463,37 +310,38 @@ export async function askPhone(
 		}
 
 		if (upd.message?.contact) {
-			setLastConsumedUpdateId(ctx, upd)
 			const phoneNumber = upd.message.contact.phone_number
-			const clean = phoneNumber.replace(/\D/g, '')
-			return clean.startsWith('998') ? `+${clean}` : `+${clean}`
+			let clean = phoneNumber.replace(/\D/g, '')
+			if (clean.startsWith('8')) clean = '7' + clean.slice(1)
+			if (!clean.startsWith('+')) clean = '+' + clean
+			return clean
 		}
 
 		const text = upd.message?.text?.trim()
 		if (text) {
-			setLastConsumedUpdateId(ctx, upd)
-
-			if (text === '/start') throw navError('START')
-			if (text === '/admin') throw navError('ADMIN')
-			if (text === '/cancel') throw navError('CANCEL')
+			const interrupted = await handleInterruptCommand(conversation, ctx, text, renderQuestion)
+			if (interrupted) continue
 			if (text === '⬅️ Orqaga') throw navError('BACK')
 			if (text === '❌ Bekor qilish') throw navError('CANCEL')
 
-			const cleaned = text.replace(/[^\d+]/g, '')
-			if (!/^\+?\d{9,15}$/.test(cleaned)) {
-				await ctx.reply('📞 Telefon raqamni to‘g‘ri kiriting.\n\nMasalan: +998901234567')
-				continue
+			// Telefon raqam formatida tekshirish
+			const clean = text.replace(/\D/g, '')
+			if (clean.length >= 9) {
+				let formatted = clean
+				if (formatted.startsWith('8')) formatted = '7' + formatted.slice(1)
+				if (!formatted.startsWith('+')) formatted = '+' + formatted
+				return formatted
 			}
 
-			return cleaned.startsWith('+') ? cleaned : `+${cleaned}`
+			return text
 		}
 
-		await ctx.reply('Iltimos, telefon raqamingizni yozing yoki tugmani bosing 📱')
+		await replaceBotMessage(ctx, 'Iltimos, telefon raqamingizni yozing yoki tugmani bosing 📱')
 	}
 }
 
 /**
- * Ask inline button choice (old version, kept for compatibility)
+ * Inline tanlov so'rash (askChoice bilan bir xil, back qaytaradi)
  */
 export async function askInline(
 	conversation: Conversation<BotContext>,
@@ -502,18 +350,13 @@ export async function askInline(
 	buttons: { text: string; data: string }[],
 	opts?: { back?: boolean; cancel?: boolean; skip?: boolean; columns?: number }
 ): Promise<string> {
-	 logger.info({ question, buttonsCount: buttons.length }, 'askInline called')
-
-		const result = await askChoice(conversation, ctx, question, buttons, opts)
-
-		logger.info({ result }, 'askInline got result')
-
-		if (result === null) throw navError('BACK')
-		return result
+	const result = await askChoice(conversation, ctx, question, buttons, opts)
+	if (result === null) throw navError('BACK')
+	return result
 }
 
 /**
- * Ask multi-select choice
+ * Multi-select tanlov so'rash
  */
 export async function askMultiSelect(
 	conversation: Conversation<BotContext>,
@@ -617,6 +460,9 @@ export async function askMultiSelect(
 	}
 }
 
+/**
+ * Rasm yuklashni so'rash
+ */
 export async function askPhoto(
 	conversation: Conversation<BotContext>,
 	ctx: BotContext,
@@ -626,10 +472,7 @@ export async function askPhoto(
 		.text('⬅️ Orqaga', 'NAV|BACK')
 		.text('❌ Bekor qilish', 'NAV|CANCEL')
 
-	await replaceBotMessage(ctx, question, {
-		parse_mode: 'Markdown',
-		reply_markup: kb
-	})
+	await replaceBotMessage(ctx, question, { parse_mode: 'Markdown', reply_markup: kb })
 
 	while (true) {
 		const upd = await conversation.wait()
@@ -638,51 +481,25 @@ export async function askPhoto(
 			await upd.answerCallbackQuery().catch(() => {})
 			const data = upd.callbackQuery.data
 			if (!data) continue
-
 			if (data === 'NAV|BACK') throw navError('BACK')
 			if (data === 'NAV|CANCEL') throw navError('CANCEL')
 			continue
 		}
 
-		const msg = upd.message
-		if (!msg) continue
-
-		// Log the received message for debugging (optional)
-		logger.info(
-			{
-				hasMessage: true,
-				hasPhoto: Boolean(msg.photo?.length),
-				hasDocument: Boolean(msg.document),
-				text: msg.text
-			},
-			'askPhoto update received'
-		)
-
-		// Check if it's a photo (regular photo)
-		const photos = msg.photo
+		const photos = upd.message?.photo
 		if (photos?.length) {
 			const best = photos[photos.length - 1]
-			logger.info({ fileId: best.file_id }, '✅ Photo accepted')
 			return best.file_id
 		}
 
-		// Check if it's a document that is an image
-		const doc = msg.document
-		if (doc) {
-			const mimeType = doc.mime_type || ''
-			const fileName = doc.file_name || ''
-
-			// Check if it's an image by mime type or file extension
-			if (mimeType.startsWith('image/') || /\.(jpg|jpeg|png|webp|gif|bmp)$/i.test(fileName)) {
-				logger.info({ fileId: doc.file_id, mimeType, fileName }, '✅ Image document accepted')
-				return doc.file_id
-			}
-
-			// If it's a document but not an image - silently ignore
-			continue
+		const doc = upd.message?.document
+		if (doc && doc.mime_type?.startsWith('image/')) {
+			return doc.file_id
 		}
 
-		// If it's text or any other media type - silently ignore, continue waiting
-		continue
+		await replaceBotMessage(ctx, 'Iltimos, rasm yuboring 📸', {
+			parse_mode: 'Markdown',
+			reply_markup: kb
+		})
 	}
 }

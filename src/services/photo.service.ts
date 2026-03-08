@@ -53,7 +53,7 @@ export class PhotoService {
 			// TO'G'RI: Telegram API orqali yuklanadi
 			const url = `https://api.telegram.org/file/bot${env.BOT_TOKEN}/${file.file_path}`
 
-			const res = await axios.get<ArrayBuffer>(url, { responseType: 'arraybuffer' })
+			const res = await axios.get(url, { responseType: 'arraybuffer' })
 			const buffer = Buffer.from(res.data)
 
 			const meta = await sharp(buffer).metadata()
@@ -116,8 +116,8 @@ export class PhotoService {
 						reject(error ?? new Error('Cloudinary upload failed'))
 						return
 					}
-					const faces = (result.faces as any[]) ?? []
-					resolve({ secureUrl: result.secure_url, publicId: result.public_id, faces })
+					const faces = ((result as any).faces as Array<{ x: number; y: number; w: number; h: number }>) ?? []
+					resolve({ secureUrl: (result as any).secure_url, publicId: (result as any).public_id, faces })
 				}
 			)
 			stream.end(buffer)
@@ -132,8 +132,8 @@ export class PhotoService {
 		const size = 8
 		const img = sharp(buffer).resize(size, size, { fit: 'fill' }).grayscale()
 		const { data } = await img.raw().toBuffer({ resolveWithObject: true })
-		const pixels = Array.from(data)
-		const avg = pixels.reduce((a, b) => a + b, 0) / pixels.length
+		const pixels = Array.from(data as Uint8Array) as number[]
+		const avg = pixels.reduce((a: number, b: number) => a + b, 0) / pixels.length
 		let bits = ''
 		for (const p of pixels) bits += p >= avg ? '1' : '0'
 		let hex = ''
