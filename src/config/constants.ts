@@ -88,8 +88,8 @@ export const PhotoRules = {
 	MIN_HEIGHT: 155,
 	MIN_RATIO: 0.3,
 	MAX_RATIO: 2.0,
-	MAX_WIDTH: 4000, 
-	MAX_HEIGHT: 4000 
+	MAX_WIDTH: 4000,
+	MAX_HEIGHT: 4000
 } as const
 
 export const RateLimit = {
@@ -99,7 +99,6 @@ export const RateLimit = {
 
 export const CallbackData = {
 	// Navigation
-	
 	NAV_BACK: 'NAV|BACK',
 	NAV_CANCEL: 'NAV|CANCEL',
 	NAV_SKIP: 'NAV|SKIP',
@@ -110,5 +109,13 @@ export const CallbackData = {
 
 	// Admin
 	ADMIN_APPROVE: 'AD|APPROVE',
-	ADMIN_REJECT: 'AD|REJECT'
+	ADMIN_REJECT: 'AD|REJECT',
+
+	// Vacancy Photo
+	VAC_PHOTO_RULES: 'VAC_PHOTO|RULES',
+	VAC_PHOTO_SKIP: 'VAC_PHOTO|SKIP',
+
+	// Course Photo
+	COURSE_PHOTO_RULES: 'COURSE_PHOTO|RULES',
+	COURSE_PHOTO_SKIP: 'COURSE_PHOTO|SKIP'
 } as const

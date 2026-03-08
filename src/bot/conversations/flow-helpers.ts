@@ -1,14 +1,36 @@
 import type { Conversation } from '@grammyjs/conversations'
 import { InlineKeyboard, Keyboard } from 'grammy'
 import type { BotContext } from '../bot'
+import { CallbackData } from '../../config/constants'
 
 export type NavSignal = 'BACK' | 'CANCEL' | 'SKIP' | 'START' | 'ADMIN'
 
 type StartIntent = 'START' | 'ADMIN' | 'CANCEL'
 
-/**
- * Joriy jarayonni to'xtatishni tasdiqlash
- */
+
+export function escapeMarkdown(text: string): string {
+  if (!text) return text
+  
+  return text
+    .replace(/_/g, '\\_')
+    .replace(/\*/g, '\\*')
+    .replace(/\[/g, '\\[')
+    .replace(/\]/g, '\\]')
+    .replace(/\(/g, '\\(')
+    .replace(/\)/g, '\\)')
+    .replace(/~/g, '\\~')
+    .replace(/`/g, '\\`')
+    .replace(/>/g, '\\>')
+    .replace(/#/g, '\\#')
+    .replace(/\+/g, '\\+')
+    .replace(/-/g, '\\-')
+    .replace(/\|/g, '\\|')
+    .replace(/\{/g, '\\{')
+    .replace(/\}/g, '\\}')
+    .replace(/\./g, '\\.')
+    .replace(/!/g, '\\!')
+  // % belgisini escape qilmaymiz!
+}
 async function confirmProcessInterrupt(
 	conversation: Conversation<BotContext>,
 	ctx: BotContext,
@@ -147,15 +169,15 @@ export function buildInlineKb(
 
 	// Navigatsiya tugmalari
 	if (opts?.skip) {
-		kb.text('⏭ O`tkazib yuborish', 'NAV|SKIP')
+		kb.text('⏭ Oʻtkazib yuborish', CallbackData.NAV_SKIP)
 		kb.row()
 	}
 	if (opts?.back) {
-		kb.text('⬅️ Orqaga', 'NAV|BACK')
+		kb.text('⬅️ Orqaga', CallbackData.NAV_BACK)
 		kb.row()
 	}
 	if (opts?.cancel) {
-		kb.text('❌ Bekor qilish', 'NAV|CANCEL')
+		kb.text('❌ Bekor qilish', CallbackData.NAV_CANCEL)
 	}
 
 	return kb
@@ -190,9 +212,9 @@ export async function askText(
 
 			await upd.answerCallbackQuery().catch(() => {})
 
-			if (data === 'NAV|BACK') throw navError('BACK')
-			if (data === 'NAV|CANCEL') throw navError('CANCEL')
-			if (data === 'NAV|SKIP') throw navError('SKIP')
+			if (data === CallbackData.NAV_BACK) throw navError('BACK')
+			if (data === CallbackData.NAV_CANCEL) throw navError('CANCEL')
+			if (data === CallbackData.NAV_SKIP) throw navError('SKIP')
 
 			continue
 		}
@@ -210,7 +232,18 @@ export async function askText(
 }
 
 /**
- * Tanlov so'rash (Inline keyboard orqali)
+ * Yordamchi funksiyalar
+ */
+export function isYesResponse(value: string | null): boolean {
+	return value !== null && value.trim() === 'YES'
+}
+
+export function isNoResponse(value: string | null): boolean {
+	return value !== null && value.trim() === 'NO'
+}
+
+/**
+ * Tanlov so'rash (Inline keyboard orqali) - TO'LIQ TUZATILGAN
  */
 export async function askChoice(
 	conversation: Conversation<BotContext>,
@@ -219,20 +252,34 @@ export async function askChoice(
 	buttons: { text: string; data: string }[],
 	opts?: { back?: boolean; cancel?: boolean; skip?: boolean; columns?: number }
 ): Promise<string | null> {
+	// allowedData setiga barcha button datalarni qo'shamiz
 	const allowedData = new Set(buttons.map(b => b.data))
 
-	if (opts?.back) allowedData.add('NAV|BACK')
-	if (opts?.cancel) allowedData.add('NAV|CANCEL')
-	if (opts?.skip) allowedData.add('NAV|SKIP')
+	console.log('✅ Yangi askChoice boshlandi, ruxsat etilgan maʼlumotlar:', Array.from(allowedData))
+
+	if (opts?.back) allowedData.add(CallbackData.NAV_BACK)
+	if (opts?.cancel) allowedData.add(CallbackData.NAV_CANCEL)
+	if (opts?.skip) allowedData.add(CallbackData.NAV_SKIP)
 
 	const kb = buildInlineKb(buttons, opts)
-	const renderQuestion = async () =>
+
+	// Eski xabarni o'chirib, yangi savolni yuborish
+	await replaceBotMessage(ctx, question, {
+		parse_mode: 'Markdown',
+		reply_markup: kb
+	})
+
+	// restore funksiyasi - xabarni qayta yuborish uchun
+	const restore = async () => {
 		await replaceBotMessage(ctx, question, {
 			parse_mode: 'Markdown',
 			reply_markup: kb
 		})
+	}
 
-	await renderQuestion()
+	// MUHIM: Faqat shu question uchun kelgan callbacklarni qabul qilish
+	let cleanupCount = 0
+	const maxCleanup = 3
 
 	while (true) {
 		const upd = await conversation.wait()
@@ -243,20 +290,36 @@ export async function askChoice(
 
 			await upd.answerCallbackQuery().catch(() => {})
 
-			if (data === 'NAV|BACK') return null
-			if (data === 'NAV|CANCEL') throw navError('CANCEL')
-			if (data === 'NAV|SKIP') throw navError('SKIP')
+			if (data === CallbackData.NAV_BACK) return null
+			if (data === CallbackData.NAV_CANCEL) throw navError('CANCEL')
+			if (data === CallbackData.NAV_SKIP) throw navError('SKIP')
 
-			if (!allowedData.has(data)) {
+			const trimmedData = data.trim()
+
+			console.log('📨 Qabul qilingan callback:', trimmedData)
+			console.log('🔍 Ruxsat bormi?', allowedData.has(trimmedData))
+
+			// MUHIM: Agar data allowedData da bo'lmasa, IGNORE QILISH
+			if (!allowedData.has(trimmedData)) {
+				console.log('⚠️ Oldingi savoldan kelgan callback eʼtiborga olinmadi:', trimmedData)
+
+				// Eski callbacklarni tozalash
+				cleanupCount++
+
+				if (cleanupCount >= maxCleanup) {
+					console.log('🔄 Juda koʻp eski callbacklar, toʻgʻri kelishini kutishda davom...')
+				}
+
 				continue
 			}
 
-			return data
+			console.log('✅ Qabul qilindi:', trimmedData)
+			return trimmedData
 		}
 
 		const text = upd.message?.text?.trim()
 		if (text) {
-			const interrupted = await handleInterruptCommand(conversation, ctx, text, renderQuestion)
+			const interrupted = await handleInterruptCommand(conversation, ctx, text, restore)
 			if (interrupted) continue
 
 			await replaceBotMessage(ctx, 'Iltimos, quyidagi tugmalardan birini tanlang 👇', {
