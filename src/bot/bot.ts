@@ -1,4 +1,4 @@
-import { Bot, Context as GrammyContext, type MiddlewareFn } from 'grammy'
+import { Bot, Context as GrammyContext, type MiddlewareFn, type UserFromGetMe } from 'grammy'
 import { conversations, createConversation, type ConversationFlavor } from '@grammyjs/conversations'
 import { type SessionFlavor } from 'grammy'
 import express, { Request, Response } from 'express'
@@ -38,47 +38,54 @@ const stateMiddleware: MiddlewareFn<BotContext> = async (ctx, next) => {
 export const bot = new Bot<BotContext>(env.BOT_TOKEN)
 setDirectBot(bot)
 
+let botInfoCache: UserFromGetMe | null = null
+let healthServerStarted = false
+let pollingStarted = false
+
+function getSafeBotInfo(): UserFromGetMe | null {
+	return botInfoCache
+}
+
+function isBotReady(): boolean {
+	return botInfoCache !== null
+}
+
 // MUHIM ORDER:
 // 1. Session
 // 2. Conversations
-// 3. Rate limit (callbacklarni o'tkazib yuborish kerak)
+// 3. Rate limit
 // 4. Auth
 // 5. Commands va Handlers
 
 bot.use(stateMiddleware)
 bot.use(sessionMiddleware)
-
-// Conversations plugin
 bot.use(conversations())
 
-// Conversationlarni register qilish
 bot.use(createConversation(applicationFlow, 'applicationFlow'))
 bot.use(createConversation(adminFlow, 'adminFlow'))
 bot.use(createConversation(courseFlow, 'courseFlow'))
 
-// Rate limit - callbacklarni o'tkazib yuborish uchun
 bot.use(rateLimitMiddleware)
-
-// Auth middleware
 bot.use(authMiddleware)
 
-// Commands va handlers eng oxirida
 setupCommands(bot)
 setupHandlers(bot)
 
-// Start menu buttons (Vacancy / Courses)
 bot.callbackQuery(
-	/^(START\|(VAC|COURSE|ADMIN|APPS|ABOUT|CONTACT|BLOG|LANG|BACK_MAIN)|LANG\|(uz|ru)|user_courses|user_vacancies|user_back_main)$/ ,
+	/^(START\|(VAC|COURSE|ADMIN|APPS|ABOUT|CONTACT|BLOG|LANG|BACK_MAIN)|LANG\|(uz|ru)|user_courses|user_vacancies|user_back_main)$/,
 	handleStartChoice
 )
+
 setupAdminHandlers(bot)
 
 bot.on('callback_query:data', async (ctx, next) => {
 	await next()
-	await ctx.answerCallbackQuery({
-		text: 'Bu tugma eskirgan. /start ni bosing yoki yangi tugmalardan foydalaning.',
-		show_alert: false
-	}).catch(() => {})
+	await ctx
+		.answerCallbackQuery({
+			text: 'Bu tugma eskirgan. /start ni bosing yoki yangi tugmalardan foydalaning.',
+			show_alert: false
+		})
+		.catch(() => {})
 })
 
 bot.catch(err => {
@@ -87,45 +94,41 @@ bot.catch(err => {
 
 // Health check server
 const app = express()
-const PORT = process.env.PORT || '4000'
+const PORT = Number(process.env.PORT || '4000')
 
-// Health check endpoint
 app.get('/health', (_req: Request, res: Response) => {
-	const healthcheck = {
+	const info = getSafeBotInfo()
+
+	res.status(200).json({
 		status: 'OK',
 		timestamp: new Date().toISOString(),
 		uptime: process.uptime(),
 		bot: {
-			status: 'running',
-			username: bot.botInfo?.username || 'unknown',
-			id: bot.botInfo?.id || 'unknown'
+			status: pollingStarted ? 'running' : 'starting',
+			initialized: isBotReady(),
+			username: info?.username ?? 'unknown',
+			id: info?.id ?? 'unknown'
 		},
 		environment: env.NODE_ENV,
 		version: process.version,
 		memory: process.memoryUsage()
-	}
-
-	try {
-		res.status(200).json(healthcheck)
-	} catch (error) {
-		healthcheck.status = 'ERROR'
-		res.status(503).json(healthcheck)
-	}
+	})
 })
 
-// Readiness check endpoint
 app.get('/ready', (_req: Request, res: Response) => {
-	res.status(200).json({
-		status: 'READY',
+	const info = getSafeBotInfo()
+	const ready = isBotReady()
+
+	res.status(ready ? 200 : 503).json({
+		status: ready ? 'READY' : 'NOT_READY',
 		timestamp: new Date().toISOString(),
 		bot: {
-			status: 'ready',
-			username: bot.botInfo?.username || null
+			status: ready ? 'ready' : 'initializing',
+			username: info?.username ?? null
 		}
 	})
 })
 
-// Liveness check endpoint
 app.get('/live', (_req: Request, res: Response) => {
 	res.status(200).json({
 		status: 'ALIVE',
@@ -133,22 +136,26 @@ app.get('/live', (_req: Request, res: Response) => {
 	})
 })
 
-// Metrics endpoint (opsiyonel)
 app.get('/metrics', (_req: Request, res: Response) => {
+	const info = getSafeBotInfo()
+
 	res.status(200).json({
 		uptime: process.uptime(),
 		memoryUsage: process.memoryUsage(),
 		cpuUsage: process.cpuUsage(),
 		botStats: {
 			startTime: new Date(Date.now() - process.uptime() * 1000).toISOString(),
-			botUsername: bot.botInfo?.username,
-			botId: bot.botInfo?.id
+			botUsername: info?.username ?? null,
+			botId: info?.id ?? null,
+			initialized: isBotReady(),
+			pollingStarted
 		}
 	})
 })
 
-// Root endpoint
 app.get('/', (_req: Request, res: Response) => {
+	const info = getSafeBotInfo()
+
 	res.status(200).json({
 		message: 'Telegram Reception Bot API',
 		version: '1.0.0',
@@ -159,26 +166,48 @@ app.get('/', (_req: Request, res: Response) => {
 			metrics: '/metrics'
 		},
 		bot: {
-			username: bot.botInfo?.username,
-			status: 'running'
+			username: info?.username ?? null,
+			status: pollingStarted ? 'running' : 'starting'
 		}
 	})
 })
 
+function startHealthServer(): void {
+	if (healthServerStarted) return
+
+	app.listen(PORT, () => {
+		logger.info(`✅ Health server running on port ${PORT}`)
+		logger.info(`   Health endpoint: http://localhost:${PORT}/health`)
+		logger.info(`   Ready endpoint: http://localhost:${PORT}/ready`)
+		logger.info(`   Live endpoint: http://localhost:${PORT}/live`)
+		logger.info(`   Metrics endpoint: http://localhost:${PORT}/metrics`)
+	})
+
+	healthServerStarted = true
+}
+
 export async function startBot(): Promise<void> {
 	try {
-		// Health serverini ishga tushirish
-		app.listen(PORT, () => {
-			logger.info(`✅ Health server running on port ${PORT}`)
-			logger.info(`   Health endpoint: http://localhost:${PORT}/health`)
-			logger.info(`   Ready endpoint: http://localhost:${PORT}/ready`)
-			logger.info(`   Live endpoint: http://localhost:${PORT}/live`)
-			logger.info(`   Metrics endpoint: http://localhost:${PORT}/metrics`)
-		})
+		startHealthServer()
 
-		// Botni ishga tushirish
+		// bot.botInfo ishlatishdan oldin init qilish shart
+		await bot.init()
+		botInfoCache = bot.botInfo
+
+		logger.info(`✅ Bot initialized: @${botInfoCache.username}`)
+
+		// Pollingdan oldin webhook o‘rnatilgan bo‘lsa o‘chirish foydali
+		// Bu webhook/polling aralashib ketishining oldini oladi
+		try {
+			await bot.api.deleteWebhook({ drop_pending_updates: false })
+			logger.info('✅ Existing webhook cleared')
+		} catch (error) {
+			logger.warn({ error }, 'Webhook clear skipped/failed')
+		}
+
 		await bot.start({
 			onStart: info => {
+				pollingStarted = true
 				logger.info(
 					env.NODE_ENV === 'development'
 						? `✅ Bot started (polling): @${info.username}`
@@ -195,12 +224,18 @@ export async function startBot(): Promise<void> {
 // Graceful shutdown
 process.on('SIGTERM', async () => {
 	logger.info('SIGTERM received, shutting down gracefully...')
-	await bot.stop()
-	process.exit(0)
+	try {
+		await bot.stop()
+	} finally {
+		process.exit(0)
+	}
 })
 
 process.on('SIGINT', async () => {
 	logger.info('SIGINT received, shutting down gracefully...')
-	await bot.stop()
-	process.exit(0)
+	try {
+		await bot.stop()
+	} finally {
+		process.exit(0)
+	}
 })
