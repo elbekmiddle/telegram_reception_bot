@@ -1,4 +1,4 @@
-import { Bot, Context as GrammyContext, type MiddlewareFn, type UserFromGetMe } from 'grammy'
+import { Bot, Context as GrammyContext, type MiddlewareFn } from 'grammy'
 import { conversations, createConversation, type ConversationFlavor } from '@grammyjs/conversations'
 import { type SessionFlavor } from 'grammy'
 import express, { Request, Response } from 'express'
@@ -17,6 +17,7 @@ import { courseFlow } from './conversations/course.flow'
 import { handleStartChoice } from './start.menu'
 import type { SessionData } from '../types/session'
 import { setDirectBot } from './conversations/direct-api'
+import { UserFromGetMe } from 'grammy/types'
 
 type BotState = {
 	telegramId?: number
@@ -194,10 +195,9 @@ export async function startBot(): Promise<void> {
 		await bot.init()
 		botInfoCache = bot.botInfo
 
-		logger.info(`✅ Bot initialized: @${botInfoCache.username}`)
-
-		// Pollingdan oldin webhook o‘rnatilgan bo‘lsa o‘chirish foydali
-		// Bu webhook/polling aralashib ketishining oldini oladi
+		
+		logger.info(`✅ Bot initialized: @${bot.botInfo.username}`)
+			
 		try {
 			await bot.api.deleteWebhook({ drop_pending_updates: false })
 			logger.info('✅ Existing webhook cleared')
