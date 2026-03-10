@@ -226,10 +226,10 @@ async function pickVacancy(conversation: Conversation<BotContext>, ctx: BotConte
 				: 'Batafsil ma’lumotni ko‘rish uchun vakansiyani tanlang.'
 		]
 		for (const vacancy of vacancies) {
-			text.push(`• *${escapeMarkdown(vacancy.title)}*`)
-			if (vacancy.salary) text.push(`  💰 ${escapeMarkdown(vacancy.salary)}`)
-			if (vacancy.description) text.push(`  📝 ${escapeMarkdown(vacancy.description.slice(0, 70))}`)
-			text.push('')
+			// text.push(`• *${escapeMarkdown(vacancy.title)}*`)
+			// if (vacancy.salary) text.push(`  💰 ${escapeMarkdown(vacancy.salary)}`)
+			// if (vacancy.description) text.push(`  📝 ${escapeMarkdown(vacancy.description.slice(0, 70))}`)
+			// text.push('')
 			kb.text(vacancy.title, `VAC|VIEW|${vacancy.id}`).row()
 		}
 		if (page > 0) kb.text('⬅️', 'VAC|PAGE|PREV')

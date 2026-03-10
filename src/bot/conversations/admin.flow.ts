@@ -804,12 +804,12 @@ async function manageVacancies(
       const salaryIcon = v.salary ? '💰' : '⚪️'
       const repeatIcon = titleCounts.get(v.title)! > 1 ? '🔄' : ''
 
-      text += `${v.isActive ? '✅' : '⛔️'} *${v.title}* ${repeatIcon}\n`
-      text += `   ${salaryIcon} ${v.salary || 'Maosh kiritilmagan'}\n`
-      text += `   🆔 ${v.id.slice(0, 8)}\n`
-      text += `   📅 ${new Date(v.createdAt).toLocaleDateString()}\n\n`
+      // text += `${v.isActive ? '✅' : '⛔️'} *${v.title}* ${repeatIcon}\n`
+      // text += `   ${salaryIcon} ${v.salary || 'Maosh kiritilmagan'}\n`
+      // text += `   🆔 ${v.id.slice(0, 8)}\n`
+      // text += `   📅 ${new Date(v.createdAt).toLocaleDateString()}\n\n`
 
-      kb.text(`${v.title} (${v.id.slice(0, 4)})`, `VAC|VIEW|${v.id}`).row()
+      kb.text(`${v.title}`, `VAC|VIEW|${v.id}`).row()
     }
 
     if (page > 0) kb.text('⬅️ Oldingi', 'VAC|PAGE|PREV')
@@ -984,10 +984,9 @@ async function viewVacancy(
 	}
 	kb.row()
 
-	kb.text('🔀 Faollik', `VAC_EDIT|TOGGLE|${vacancy.id}`)
+	// kb.text('🔀 Faollik', `VAC_EDIT|TOGGLE|${vacancy.id}`)
 		.text('❓ Savollar', `VAC_QUESTIONS|${vacancy.id}`)
 		.row()
-		.text('📋 Arizalar', `VAC_APPLICATIONS|${vacancy.id}`)
 		.text('🗑 O‘chirish', `VAC_DELETE|${vacancy.id}`)
 		.row()
 		.text('⬅️ Orqaga', 'VAC_BACK')
@@ -1370,21 +1369,21 @@ async function manageCourses(
       // MUHIM: Kurs nomini escape qilish
       const escapedTitle = escapeMarkdown(course.title)
       
-      text += `• ${course.isActive ? '✅' : '⛔️'} *${escapedTitle}*\n`
+      // text += `• ${course.isActive ? '✅' : '⛔️'} *${escapedTitle}*\n`
       
-      // MUHIM: Narxni to'g'ri formatlash - "so'm" ikki marta yozilmasligi uchun
-      let priceText = 'Kiritilmagan'
-      if (course.price) {
-        if (course.price === 'Bepul') {
-          priceText = course.price
-        } else if (course.price.includes('soʻm') || course.price.includes("so'm")) {
-          priceText = course.price
-        } else {
-          priceText = `${course.price} soʻm`
-        }
-      }
+      // // MUHIM: Narxni to'g'ri formatlash - "so'm" ikki marta yozilmasligi uchun
+      // let priceText = 'Kiritilmagan'
+      // if (course.price) {
+      //   if (course.price === 'Bepul') {
+      //     priceText = course.price
+      //   } else if (course.price.includes('soʻm') || course.price.includes("so'm")) {
+      //     priceText = course.price
+      //   } else {
+      //     priceText = `${course.price} soʻm`
+      //   }
+      // }
       
-      text += `  💰 Narxi: ${priceText}\n`
+      // text += `  💰 Narxi: ${priceText}\n`
       
       // MUHIM: Tavsifni escape qilish
       if (course.description) {
@@ -1393,7 +1392,6 @@ async function manageCourses(
         const shortDesc = escapedDesc.length > 50 
           ? escapedDesc.substring(0, 47) + '...' 
           : escapedDesc
-        text += `  📝 ${shortDesc}\n`
       }
       text += '\n'
       kb.text(course.title, `COURSE|VIEW|${course.id}`).row()
@@ -1634,7 +1632,7 @@ async function viewCourse(
   }
   kb.row()
 
-  kb.text('🔀 Faollik', `COURSE_EDIT|TOGGLE|${course.id}`)
+  // kb.text('🔀 Faollik', `COURSE_EDIT|TOGGLE|${course.id}`)
     .row()
     .text('🗑 Oʻchirish', `COURSE_DELETE|${course.id}`)
     .row()
@@ -3545,21 +3543,103 @@ async function handleCourseCreate(
 		data: { courseId: course.id }
 	}
 }
-
 async function handleCoursePhoto(
 	conversation: Conversation<BotContext>,
 	ctx: BotContext
 ): Promise<void> {
 	const state = ctx.session.flowState
+	const courseId = state.data.courseId
 
-	console.log('📸 Kurs rasmi soʻralmoqda...')
-	const photoUrl = await uploadCoursePhoto(conversation, ctx, state.data.courseId, false)
+	const kb = new InlineKeyboard()
+		.text('⏭ Oʻtkazib yuborish', 'COURSE_PHOTO_SKIP')
+		.text('❌ Bekor qilish', 'NAV|CANCEL')
 
-	if (photoUrl) {
-		console.log('✅ Kurs rasmi yuklandi:', photoUrl)
+	await ctx.reply(
+		[
+			'📸 *Kurs uchun rasm yuklang*',
+			'',
+			'• JPG yoki PNG format',
+			'• Ixtiyoriy — oʻtkazib yuborishingiz mumkin',
+			'• Rasm kurs haqida maʼlumot berishi mumkin',
+			'',
+			'Rasmni yuboring:'
+		].join('\n'),
+		{ parse_mode: 'Markdown', reply_markup: kb }
+	)
+
+	while (true) {
+		const upd = await conversation.wait()
+
+		// CALLBACK QUERY HANDLER
+		if (upd.callbackQuery) {
+			const data = upd.callbackQuery.data
+			await upd.answerCallbackQuery().catch(() => {})
+
+			if (data === 'NAV|CANCEL') throw navError('CANCEL')
+
+			if (data === 'COURSE_PHOTO_SKIP') {
+				await ctx.reply('⏭ Kurs rasmi yuklanmadi')
+				ctx.session.flowState = { step: 'idle' }
+				return
+			}
+
+			// Boshqa callbacklarni ignore qilish
+			continue
+		}
+
+		// PHOTO HANDLER
+		if (upd.message?.photo?.length) {
+			const best = upd.message.photo[upd.message.photo.length - 1]
+			const loadingMsg = await ctx.reply('⏳ Rasm yuklanmoqda...')
+
+			try {
+				// Telegram dan file olish
+				const file = await ctx.api.getFile(best.file_id)
+				if (!file.file_path) {
+					await ctx.api.deleteMessage(ctx.chat!.id, loadingMsg.message_id).catch(() => {})
+					await ctx.reply('❌ Rasmni olishda xatolik. Qayta yuboring.')
+					continue
+				}
+
+				// File ni yuklab olish
+				const axios = (await import('axios')).default
+				const url = `https://api.telegram.org/file/bot${process.env.BOT_TOKEN}/${file.file_path}`
+				const res = await axios.get(url, { responseType: 'arraybuffer' })
+				const buffer = Buffer.from(res.data)
+
+				// Cloudinary ga yuklash
+				const uploaded = await photoService.uploadBufferToCloudinary(buffer)
+
+				// Yuklanayotgan xabarni o'chirish
+				await ctx.api.deleteMessage(ctx.chat!.id, loadingMsg.message_id).catch(() => {})
+
+				// Database ga saqlash
+				await prisma.course.update({
+					where: { id: courseId },
+					data: { imageUrl: uploaded.secureUrl }
+				})
+
+				await ctx.reply('✅ Kurs rasmi muvaffaqiyatli yuklandi!')
+
+				// Flow ni tugatish
+				ctx.session.flowState = { step: 'idle' }
+				return
+			} catch (error) {
+				logger.error({ error }, 'Failed to upload course photo')
+				await ctx.api.deleteMessage(ctx.chat!.id, loadingMsg.message_id).catch(() => {})
+				await ctx.reply('❌ Rasmni yuklashda xatolik. Qayta urinib koʻring.')
+				continue
+			}
+		}
+
+		// TEXT HANDLER
+		if (upd.message?.text) {
+			const text = upd.message.text.trim()
+			if (text === '/cancel') throw navError('CANCEL')
+			if (text === '/start') throw navError('START')
+			await ctx.reply('Iltimos, rasm yuboring yoki tugmadan foydalaning.')
+		}
 	}
-
-	ctx.session.flowState = { step: 'idle' }
 }
 
 /* =========================
