@@ -4,3 +4,5 @@ dist
 .prisma
 .DS_Store
 *.log
+# Prisma v7 generated client
+src/generated/prisma

@@ -2,7 +2,7 @@
 // is not generated yet (e.g., CI without Prisma engines).
 // In production you should run `npx prisma generate` which will provide real types.
 
-declare module '@prisma/client' {
+declare module '../generated/prisma/client' {
   // ===== Enums (as runtime objects + union types) =====
   export const ApplicationStatus: {
     NEW: 'NEW'

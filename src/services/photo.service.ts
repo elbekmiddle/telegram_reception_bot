@@ -49,7 +49,7 @@ export class PhotoService {
 			if (!file.file_path) {
 				return { ok: false, reason: 'Rasmni olishda xatolik. Qayta yuboring.' }
 			}
-			
+
 			// TO'G'RI: Telegram API orqali yuklanadi
 			const url = `https://api.telegram.org/file/bot${env.BOT_TOKEN}/${file.file_path}`
 
@@ -101,7 +101,11 @@ export class PhotoService {
 
 	async uploadBufferToCloudinary(
 		buffer: Buffer
-	): Promise<{ secureUrl: string; publicId: string; faces: Array<{ x: number; y: number; w: number; h: number }> }> {
+	): Promise<{
+		secureUrl: string
+		publicId: string
+		faces: Array<{ x: number; y: number; w: number; h: number }>
+	}> {
 		return new Promise((resolve, reject) => {
 			const stream = cloudinary.uploader.upload_stream(
 				{
@@ -116,8 +120,13 @@ export class PhotoService {
 						reject(error ?? new Error('Cloudinary upload failed'))
 						return
 					}
-					const faces = ((result as any).faces as Array<{ x: number; y: number; w: number; h: number }>) ?? []
-					resolve({ secureUrl: (result as any).secure_url, publicId: (result as any).public_id, faces })
+					const faces =
+						((result as any).faces as Array<{ x: number; y: number; w: number; h: number }>) ?? []
+					resolve({
+						secureUrl: (result as any).secure_url,
+						publicId: (result as any).public_id,
+						faces
+					})
 				}
 			)
 			stream.end(buffer)

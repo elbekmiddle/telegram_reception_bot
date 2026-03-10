@@ -6,6 +6,8 @@ const initialSessionData = (): SessionData => ({
 	currentStep: StepKey.PERSON_FULL_NAME,
 	history: [],
 	temp: { answers: {} },
+	flowActive: false,
+	flowState: { step: 'idle', data: {} },
 	createdAt: Date.now(),
 	lastActivity: Date.now()
 })

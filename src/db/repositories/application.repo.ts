@@ -1,4 +1,4 @@
-import { Application, ApplicationStatus, Prisma } from '@prisma/client'
+import { Application, ApplicationStatus, Prisma } from '../../generated/prisma/client'
 import { prisma } from '../prisma'
 import { logger } from '../../utils/logger'
 

@@ -3,7 +3,6 @@ import { logger } from '../utils/logger'
 
 export type CreateCourseDTO = {
 	title: string
-	level: string
 	description?: string | null
 	isActive?: boolean
 }
@@ -21,7 +20,6 @@ export class CourseRepository {
 			return await prisma.course.create({
 				data: {
 					title: data.title,
-					level: data.level,
 					description: data.description ?? null,
 					isActive: data.isActive ?? true
 				}

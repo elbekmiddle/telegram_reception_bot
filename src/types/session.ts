@@ -30,6 +30,11 @@ export interface SessionData {
 		// Dynamic propertylar uchun
 		[key: string]: any
 	}
+	flowActive: boolean
+	flowState?: {
+		step: string
+		data?: Record<string, any> | any
+	}
 	lastBotMessageId?: number
 	createdAt?: number
 	lastActivity?: number

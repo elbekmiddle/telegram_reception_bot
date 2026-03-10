@@ -5,7 +5,17 @@ import { showStartMenu } from './start.menu'
 
 export function setupCommands(bot: Bot<BotContext>): void {
 	// /start is handled as a simple menu (not a conversation)
-	bot.command('start', showStartMenu)
+	bot.command('start', async ctx => {
+		ctx.session.flowActive = false
+		ctx.session.flowState = { step: 'idle' }
+		try {
+			const active = await ctx.conversation.active()
+			for (const name of Object.keys(active || {})) {
+				await ctx.conversation.exit(name).catch(() => {})
+			}
+		} catch {}
+		await showStartMenu(ctx)
+	})
 
 	// Admin command
 	bot.command('admin', async ctx => {
@@ -19,11 +29,12 @@ export function setupCommands(bot: Bot<BotContext>): void {
 				return
 			}
 
+			ctx.session.flowActive = false
+			ctx.session.flowState = { step: 'idle' }
 			const activeConversations = await ctx.conversation.active()
-			if (activeConversations.length > 0) {
-				await ctx.conversation.exit()
+			for (const name of Object.keys(activeConversations || {})) {
+				await ctx.conversation.exit(name).catch(() => {})
 			}
-
 			await ctx.conversation.enter('adminFlow')
 		} catch (err) {
 			logger.error({ err, userId: ctx.from?.id }, 'Admin command error')
@@ -34,7 +45,10 @@ export function setupCommands(bot: Bot<BotContext>): void {
 	// Cancel command - conversationni to'xtatadi
 	bot.command('cancel', async ctx => {
 		try {
-			await ctx.conversation.exit()
+			const active = await ctx.conversation.active()
+			for (const name of Object.keys(active || {})) {
+				await ctx.conversation.exit(name).catch(() => {})
+			}
 
 			if (ctx.session.applicationId) {
 				// Bu yerda applicationni cancel qilish kerak

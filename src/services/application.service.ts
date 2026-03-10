@@ -1,4 +1,4 @@
-import { Application, AnswerFieldType, FileType, ApplicationStatus } from '@prisma/client'
+import { Application, AnswerFieldType, FileType, ApplicationStatus } from '../generated/prisma/client'
 import { applicationRepo } from '../db/repositories/application.repo'
 import { answerRepo } from '../db/repositories/answer.repo'
 import { fileRepo } from '../db/repositories/file.repo'

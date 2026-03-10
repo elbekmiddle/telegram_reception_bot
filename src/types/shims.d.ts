@@ -91,3 +91,25 @@ declare module 'path' {
   const path: any
   export = path
 }
+
+declare module '@prisma/adapter-pg' {
+  export class PrismaPg {
+    constructor(...args: any[])
+  }
+}
+
+declare module '../generated/prisma/client' {
+  export const PrismaClient: any
+  export type Application = any
+  export type AnswerFieldType = any
+  export type FileType = any
+  export type ApplicationStatus = any
+}
+
+declare module '../../generated/prisma/client' {
+  export const PrismaClient: any
+  export type Application = any
+  export type AnswerFieldType = any
+  export type FileType = any
+  export type ApplicationStatus = any
+}

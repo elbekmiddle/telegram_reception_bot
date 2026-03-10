@@ -6,9 +6,9 @@ import { type BotContext } from '../bot'
 import { photoService, type HalfBodyPhotoRules } from '../../services/photo.service'
 import { keyboards } from '../../utils/keyboards'
 import { applicationService } from '../../services/application.service'
-import { FileType } from '@prisma/client'
+import { FileType } from '../../generated/prisma/client'
 import { answerRepo } from '../../db/repositories/answer.repo'
-import { AnswerFieldType } from '@prisma/client'
+import { AnswerFieldType } from '../../generated/prisma/client'
 import { logger } from '../../utils/logger'
 
 export type HalfBodyPhotoResult = {

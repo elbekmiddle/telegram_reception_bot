@@ -1,4 +1,4 @@
-import { ApplicationStatus, FileType, AnswerFieldType } from '@prisma/client'
+import { ApplicationStatus, FileType, AnswerFieldType } from '../generated/prisma/client'
 
 export interface CreateApplicationDTO {
 	telegramId: number

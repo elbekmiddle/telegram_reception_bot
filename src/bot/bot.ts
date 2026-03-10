@@ -68,10 +68,18 @@ setupHandlers(bot)
 
 // Start menu buttons (Vacancy / Courses)
 bot.callbackQuery(
-	/^(START\|(VAC|COURSE|ADMIN)|user_courses|user_vacancies|user_back_main)$/,
+	/^(START\|(VAC|COURSE|ADMIN|APPS|ABOUT|CONTACT|BLOG|LANG|BACK_MAIN)|LANG\|(uz|ru)|user_courses|user_vacancies|user_back_main)$/ ,
 	handleStartChoice
 )
 setupAdminHandlers(bot)
+
+bot.on('callback_query:data', async (ctx, next) => {
+	await next()
+	await ctx.answerCallbackQuery({
+		text: 'Bu tugma eskirgan. /start ni bosing yoki yangi tugmalardan foydalaning.',
+		show_alert: false
+	}).catch(() => {})
+})
 
 bot.catch(err => {
 	logger.error({ err }, 'Unhandled bot error')

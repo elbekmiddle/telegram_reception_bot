@@ -76,6 +76,42 @@ async function askPhone(conversation: Conversation<BotContext>, ctx: BotContext)
 	}
 }
 
+async function askCourseAction(
+	conversation: Conversation<BotContext>,
+	ctx: BotContext,
+	course: { id: string; title: string; description: string | null; price: string | null; imageUrl?: string | null }
+): Promise<string> {
+	const detail = [
+		`🎓 *${course.title}*`,
+		'',
+		course.description ? `📝 ${course.description}` : '📝 Ma’lumot yo‘q',
+		`💰 Narxi: *${course.price ?? '-'}*`
+	].join('\n')
+	const kb = new InlineKeyboard()
+		.text('✅ Kursga yozilish', `ENROLL|${course.id}`)
+		.row()
+		.text('⬅️ Orqaga', 'NAV|BACK')
+
+	await deletePrev(ctx)
+	if (course.imageUrl) {
+		const sent = await ctx.replyWithPhoto(course.imageUrl, {
+			caption: detail,
+			parse_mode: 'Markdown',
+			reply_markup: kb
+		})
+		ctx.session.lastBotMessageId = sent.message_id
+	} else {
+		await replaceBotMessage(ctx, detail, { parse_mode: 'Markdown', reply_markup: kb })
+	}
+
+	while (true) {
+		const upd = await conversation.wait()
+		if (!upd.callbackQuery?.data) continue
+		await upd.answerCallbackQuery().catch(() => undefined)
+		return upd.callbackQuery.data
+	}
+}
+
 async function pickCourse(
 	conversation: Conversation<BotContext>,
 	ctx: BotContext
@@ -138,17 +174,7 @@ export async function courseFlow(
 		const course = await prisma.course.findUnique({ where: { id: courseId } })
 		if (!course) continue
 
-		const detail = [
-			`🎓 *${course.title}*`,
-			'',
-			course.description ? `📝 ${course.description}` : '📝 Ma’lumot yo‘q',
-			`💰 Narxi: *${course.price ?? '-'}*`
-		].join('\n')
-
-		const act = await askInline(conversation, ctx, detail, [
-			{ text: '✅ Kursga yozilish', data: `ENROLL|${courseId}` },
-			{ text: '⬅️ Orqaga', data: 'NAV|BACK' }
-		])
+		const act = await askCourseAction(conversation, ctx, course)
 		if (act === 'NAV|BACK') continue
 		if (!act.startsWith('ENROLL|')) continue
 
@@ -193,6 +219,17 @@ export async function courseFlow(
 			.text('✅ Qabul qilish', `CE|APPROVE|${enrollment.id}`)
 			.text('❌ Rad etish', `CE|REJECT|${enrollment.id}`)
 
+		const dayLabelMap: Record<string, string> = {
+			MON_WED: 'Dushanba / Chorshanba',
+			TUE_THU: 'Seshanba / Payshanba',
+			SAT_SUN: 'Shanba / Yakshanba'
+		}
+		const timeLabelMap: Record<string, string> = {
+			'9_11': '09:00 - 11:00',
+			'2_4': '14:00 - 16:00',
+			'4_6': '16:00 - 18:00'
+		}
+
 		for (const a of adminIds) {
 			try {
 				await ctx.api.sendMessage(
@@ -200,10 +237,10 @@ export async function courseFlow(
 					[
 						`🆕 *Kursga yozilish*`,
 						`🎓 Kurs: *${course.title}*`,
-						`👤 Ism: ${fullName}`,
+						`👤 F\.I\.Sh: ${fullName}`,
 						`📞 Telefon: ${phone}`,
-						`📅 Kunlar: ${days.replace('DAYS|', '')}`,
-						`⏰ Vaqt: ${time.replace('TIME|', '')}`
+						`📅 Kunlar: ${dayLabelMap[days.replace('DAYS|', '')] || days.replace('DAYS|', '')}`,
+						`⏰ Vaqt: ${timeLabelMap[time.replace('TIME|', '')] || time.replace('TIME|', '')}`
 					].join('\n'),
 					{ parse_mode: 'Markdown', reply_markup: kb }
 				)

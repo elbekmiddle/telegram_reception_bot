@@ -2,6 +2,7 @@ import type { Conversation } from '@grammyjs/conversations'
 import { InlineKeyboard, Keyboard } from 'grammy'
 import type { BotContext } from '../bot'
 import { CallbackData } from '../../config/constants'
+import { getUserLang } from '../../utils/i18n'
 
 export type NavSignal = 'BACK' | 'CANCEL' | 'SKIP' | 'START' | 'ADMIN'
 
@@ -10,26 +11,15 @@ type StartIntent = 'START' | 'ADMIN' | 'CANCEL'
 
 export function escapeMarkdown(text: string): string {
   if (!text) return text
-  
+
   return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
     .replace(/_/g, '\\_')
     .replace(/\*/g, '\\*')
-    .replace(/\[/g, '\\[')
-    .replace(/\]/g, '\\]')
-    .replace(/\(/g, '\\(')
-    .replace(/\)/g, '\\)')
-    .replace(/~/g, '\\~')
     .replace(/`/g, '\\`')
-    .replace(/>/g, '\\>')
-    .replace(/#/g, '\\#')
-    .replace(/\+/g, '\\+')
-    .replace(/-/g, '\\-')
-    .replace(/\|/g, '\\|')
-    .replace(/\{/g, '\\{')
-    .replace(/\}/g, '\\}')
-    .replace(/\./g, '\\.')
-    .replace(/!/g, '\\!')
-  // % belgisini escape qilmaymiz!
+    .replace(/\[/g, '\\[')
 }
 async function confirmProcessInterrupt(
 	conversation: Conversation<BotContext>,
@@ -264,14 +254,14 @@ export async function askChoice(
 	const kb = buildInlineKb(buttons, opts)
 
 	// Eski xabarni o'chirib, yangi savolni yuborish
-	await replaceBotMessage(ctx, question, {
+	let promptMsg = await replaceBotMessage(ctx, question, {
 		parse_mode: 'Markdown',
 		reply_markup: kb
 	})
 
 	// restore funksiyasi - xabarni qayta yuborish uchun
 	const restore = async () => {
-		await replaceBotMessage(ctx, question, {
+		promptMsg = await replaceBotMessage(ctx, question, {
 			parse_mode: 'Markdown',
 			reply_markup: kb
 		})
@@ -288,31 +278,57 @@ export async function askChoice(
 			const data = upd.callbackQuery.data
 			if (!data) continue
 
-			await upd.answerCallbackQuery().catch(() => {})
+			const fromMessageId = upd.callbackQuery.message?.message_id
+			if (fromMessageId && promptMsg?.message_id && fromMessageId !== promptMsg.message_id) {
+				console.log('⚠️ Eski xabardagi callback eʼtiborga olinmadi:', data)
+				await upd.answerCallbackQuery({
+					text: getUserLang(ctx) === 'ru' ? 'Эти кнопки устарели.' : 'Bu tugmalar eskirgan.',
+					show_alert: false
+				}).catch(() => {})
+				continue
+			}
 
-			if (data === CallbackData.NAV_BACK) return null
-			if (data === CallbackData.NAV_CANCEL) throw navError('CANCEL')
-			if (data === CallbackData.NAV_SKIP) throw navError('SKIP')
+			if (data === CallbackData.NAV_BACK) {
+				await upd.answerCallbackQuery().catch(() => {})
+				return null
+			}
+			if (data === CallbackData.NAV_CANCEL) {
+				await upd.answerCallbackQuery().catch(() => {})
+				throw navError('CANCEL')
+			}
+			if (data === CallbackData.NAV_SKIP) {
+				await upd.answerCallbackQuery().catch(() => {})
+				throw navError('SKIP')
+			}
 
 			const trimmedData = data.trim()
 
 			console.log('📨 Qabul qilingan callback:', trimmedData)
 			console.log('🔍 Ruxsat bormi?', allowedData.has(trimmedData))
 
-			// MUHIM: Agar data allowedData da bo'lmasa, IGNORE QILISH
 			if (!allowedData.has(trimmedData)) {
 				console.log('⚠️ Oldingi savoldan kelgan callback eʼtiborga olinmadi:', trimmedData)
-
-				// Eski callbacklarni tozalash
+				await upd.answerCallbackQuery({
+					text: getUserLang(ctx) === 'ru' ? 'Эти кнопки устарели. Используйте актуальные кнопки ниже.' : 'Bu tugmalar eskirgan. Pastdagi yangi tugmalardan foydalaning.',
+					show_alert: false
+				}).catch(() => {})
 				cleanupCount++
-
 				if (cleanupCount >= maxCleanup) {
 					console.log('🔄 Juda koʻp eski callbacklar, toʻgʻri kelishini kutishda davom...')
 				}
-
 				continue
 			}
 
+			await upd.answerCallbackQuery().catch(() => {})
+			try {
+				if (upd.callbackQuery.message?.message_id) {
+					await ctx.api.editMessageReplyMarkup(ctx.chat!.id, upd.callbackQuery.message.message_id, {
+						reply_markup: undefined
+					}).catch(() => {})
+				}
+			} catch {
+				// ignore
+			}
 			console.log('✅ Qabul qilindi:', trimmedData)
 			return trimmedData
 		}
@@ -373,9 +389,15 @@ export async function askPhone(
 		}
 
 		if (upd.message?.contact) {
+			if (upd.message.contact.user_id && upd.message.contact.user_id !== ctx.from?.id) {
+				await replaceBotMessage(ctx, getUserLang(ctx) === 'ru' ? 'Пожалуйста, отправьте свой номер через кнопку ниже.' : 'Iltimos, pastdagi tugma orqali aynan o‘zingizning raqamingizni yuboring 📱', {
+					parse_mode: 'Markdown',
+					reply_markup: replyKeyboard
+				})
+				continue
+			}
 			const phoneNumber = upd.message.contact.phone_number
 			let clean = phoneNumber.replace(/\D/g, '')
-			if (clean.startsWith('8')) clean = '7' + clean.slice(1)
 			if (!clean.startsWith('+')) clean = '+' + clean
 			return clean
 		}
@@ -387,19 +409,14 @@ export async function askPhone(
 			if (text === '⬅️ Orqaga') throw navError('BACK')
 			if (text === '❌ Bekor qilish') throw navError('CANCEL')
 
-			// Telefon raqam formatida tekshirish
-			const clean = text.replace(/\D/g, '')
-			if (clean.length >= 9) {
-				let formatted = clean
-				if (formatted.startsWith('8')) formatted = '7' + formatted.slice(1)
-				if (!formatted.startsWith('+')) formatted = '+' + formatted
-				return formatted
-			}
-
-			return text
+			await replaceBotMessage(ctx, getUserLang(ctx) === 'ru' ? 'Используйте кнопку отправки контакта ниже. Ввод вручную отключён.' : 'Pastdagi kontakt yuborish tugmasidan foydalaning. Qo‘lda kiritish o‘chirib qo‘yilgan.', {
+				parse_mode: 'Markdown',
+				reply_markup: replyKeyboard
+			})
+			continue
 		}
 
-		await replaceBotMessage(ctx, 'Iltimos, telefon raqamingizni yozing yoki tugmani bosing 📱')
+		await replaceBotMessage(ctx, getUserLang(ctx) === 'ru' ? 'Используйте кнопку отправки контакта ниже.' : 'Pastdagi kontakt yuborish tugmasidan foydalaning 📱', { reply_markup: replyKeyboard })
 	}
 }
 

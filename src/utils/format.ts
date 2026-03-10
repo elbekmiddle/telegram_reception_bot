@@ -287,8 +287,8 @@ export async function buildAdminSummary(applicationId: string): Promise<string> 
 		const vacancyId = app?.vacancyId ?? null
 		const qMap = new Map<string, string>()
 		if (vacancyId) {
-			const qs = await prisma.vacancyQuestion.findMany({ where: { vacancyId } })
-			for (const q of qs) qMap.set(q.key, q.question)
+			const qs = await prisma.vacancyQuestion.findMany({ where: { vacancyId }, orderBy: { order: 'asc' } })
+			for (const q of qs as any[]) qMap.set(String(q.id), q.question)
 		}
 		vqBlock += `\n❓ *Vakansiya savollari:*\n`
 		for (const [k, v] of vq) {

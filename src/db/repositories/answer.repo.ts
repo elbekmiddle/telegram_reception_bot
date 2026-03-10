@@ -1,4 +1,4 @@
-import { ApplicationAnswer, AnswerFieldType } from '@prisma/client'
+import { ApplicationAnswer, AnswerFieldType } from '../../generated/prisma/client'
 import { prisma } from '../prisma'
 import { logger } from '../../utils/logger'
 

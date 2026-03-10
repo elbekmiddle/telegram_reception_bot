@@ -1,4 +1,4 @@
-import { ApplicationFile, FileType } from '@prisma/client'
+import { ApplicationFile, FileType } from '../../generated/prisma/client'
 import { prisma } from '../prisma'
 import { logger } from '../../utils/logger'
 
@@ -21,7 +21,7 @@ export class FileRepository {
 					telegramFileId: data.telegramFileId,
 					cloudinaryUrl: data.cloudinaryUrl,
 					cloudinaryPublicId: data.cloudinaryPublicId,
-					meta: data.meta ?? {}
+					meta: (data.meta ?? {}) as any
 				}
 			})
 		} catch (error) {

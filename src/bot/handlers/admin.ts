@@ -5,12 +5,29 @@ import { type BotContext } from '../bot'
 import { applicationService } from '../../services/application.service'
 import { prisma } from '../../db/prisma'
 import { logger } from '../../utils/logger'
+import { getUserLang } from '../../utils/i18n'
+
+
+function atext(ctx: BotContext, uz: string, ru: string): string {
+	return getUserLang(ctx) === 'ru' ? ru : uz
+}
 
 function isAdmin(userId?: number): boolean {
 	const admins = [process.env.ADMIN_CHAT_ID, process.env.ADMIN_CHAT_ID_2]
 		.map(v => Number(v || 0))
 		.filter(Boolean)
 	return Boolean(userId && admins.includes(userId))
+}
+
+function userDisplayName(user: { firstName?: string | null; lastName?: string | null; username?: string | null } | null | undefined): string {
+	const full = [user?.firstName, user?.lastName].filter(Boolean).join(' ').trim()
+	return full || user?.username || '—'
+}
+
+function enrollmentStatusPretty(ctx: BotContext, status: string): string {
+	if (status === 'APPROVED') return atext(ctx, 'Qabul qilindi', 'Принята')
+	if (status === 'REJECTED') return atext(ctx, 'Rad etildi', 'Отклонена')
+	return atext(ctx, 'Kutilmoqda', 'Ожидает')
 }
 
 function scheduleKeyboard(applicationId: string) {
@@ -22,38 +39,49 @@ function scheduleKeyboard(applicationId: string) {
 		.text('✍️ Qo‘lda kiritish', `SCHEDULE|${applicationId}|CUSTOM`)
 }
 
-async function sendApplicationApprovedMessage(ctx: BotContext, applicationId: string, text: string) {
+async function sendApplicationApprovedMessage(ctx: BotContext, applicationId: string, text?: string) {
 	const application = await prisma.application.findUnique({ where: { id: applicationId } })
 	if (!application) {
 		await ctx.reply('Ariza topilmadi.')
 		return
 	}
 
-	await ctx.api.sendMessage(
-		Number(application.telegramId),
-		`✅ *Arizangiz qabul qilindi!*\n\n${text}`,
-		{ parse_mode: 'Markdown' }
-	)
+	const base = getUserLang(ctx) === 'ru' ? '✅ Ваша заявка принята.' : '✅ Arizangiz qabul qilindi.'
+	const message = text ? `${base}\n\n${text}` : base
+	await ctx.api.sendMessage(Number(application.telegramId), message)
 }
 
 export async function tryHandleAdminText(ctx: BotContext): Promise<boolean> {
 	if (!isAdmin(ctx.from?.id)) return false
-	if (ctx.session.temp?.waitingFor !== 'custom_schedule') return false
+	const waitingFor = ctx.session.temp?.waitingFor
+	if (!waitingFor) return false
 	const applicationId = ctx.session.temp?.approvedApplicationId
-	const customText = ctx.message?.text?.trim()
-	if (!applicationId || !customText) return false
+	const text = ctx.message?.text?.trim()
+	if (!applicationId || !text) return false
 
 	try {
-		await sendApplicationApprovedMessage(ctx, applicationId, `Kelish vaqti: *${customText}*`)
-		ctx.session.temp.waitingFor = undefined
-		ctx.session.temp.approvedApplicationId = undefined
-		await ctx.reply('✅ Foydalanuvchiga vaqt yuborildi.')
-		return true
+		if (waitingFor === 'custom_schedule') {
+			await sendApplicationApprovedMessage(ctx, applicationId, atext(ctx, `Kelish vaqti: ${text}`, `Время прихода: ${text}`))
+			ctx.session.temp.waitingFor = undefined
+			ctx.session.temp.approvedApplicationId = undefined
+			await ctx.reply(atext(ctx, '✅ Foydalanuvchiga vaqt yuborildi.', '✅ Время отправлено пользователю.'))
+			return true
+		}
+
+		if (waitingFor === 'approval_message') {
+			await sendApplicationApprovedMessage(ctx, applicationId, text)
+			ctx.session.temp.waitingFor = undefined
+			ctx.session.temp.approvedApplicationId = undefined
+			await ctx.reply(atext(ctx, '✅ Ariza qabul qilindi va foydalanuvchiga xabar yuborildi.', '✅ Заявка принята и сообщение пользователю отправлено.'))
+			return true
+		}
 	} catch (err) {
-		logger.error({ err, applicationId }, 'Failed to send custom schedule message')
-		await ctx.reply('Xatolik yuz berdi.')
+		logger.error({ err, applicationId, waitingFor }, 'Failed to handle admin text')
+		await ctx.reply(atext(ctx, 'Xatolik yuz berdi.', 'Произошла ошибка.'))
 		return true
 	}
+
+	return false
 }
 
 export function setupAdminHandlers(bot: Bot<BotContext>): void {
@@ -68,15 +96,21 @@ export function setupAdminHandlers(bot: Bot<BotContext>): void {
 				include: { user: true, course: true }
 			})
 
-			await ctx.editMessageText('✅ Kursga yozilish qabul qilindi.')
+			await ctx.editMessageText([
+				`📝 ${enrollment.course.title}`,
+				`${atext(ctx, '👤 F.I.Sh', '👤 Ф.И.О')}: ${enrollment.fullName || userDisplayName(enrollment.user)}`,
+				`📞 ${atext(ctx, 'Telefon', 'Телефон')}: ${enrollment.phone || '—'}`,
+				`📍 ${atext(ctx, 'Holat', 'Статус')}: ${enrollmentStatusPretty(ctx, 'APPROVED')}`,
+				`🗓 ${atext(ctx, 'Sana', 'Дата')}: ${enrollment.createdAt.toLocaleString('ru-RU')}`
+			].join('\n'))
 			await ctx.api.sendMessage(
 				Number(enrollment.user.telegramId),
-				`✅ *Kursga yozilish qabul qilindi!*\n\nKurs: *${enrollment.course.title}*`,
+				atext(ctx, `✅ *Kursga yozilish qabul qilindi!*\n\nKurs: *${enrollment.course.title}*`, `✅ *Ваша запись на курс принята!*\n\nКурс: *${enrollment.course.title}*`),
 				{ parse_mode: 'Markdown' }
 			)
 		} catch (err) {
 			logger.error({ err }, 'Course enrollment approve failed')
-			await ctx.reply('Xatolik yuz berdi.')
+			await ctx.reply(atext(ctx, 'Xatolik yuz berdi.', 'Произошла ошибка.'))
 		}
 	})
 
@@ -91,15 +125,48 @@ export function setupAdminHandlers(bot: Bot<BotContext>): void {
 				include: { user: true, course: true }
 			})
 
-			await ctx.editMessageText('❌ Kursga yozilish rad etildi.')
+			await ctx.editMessageText([
+				`📝 ${enrollment.course.title}`,
+				`${atext(ctx, '👤 F.I.Sh', '👤 Ф.И.О')}: ${enrollment.fullName || userDisplayName(enrollment.user)}`,
+				`📞 ${atext(ctx, 'Telefon', 'Телефон')}: ${enrollment.phone || '—'}`,
+				`📍 ${atext(ctx, 'Holat', 'Статус')}: ${enrollmentStatusPretty(ctx, 'REJECTED')}`,
+				`🗓 ${atext(ctx, 'Sana', 'Дата')}: ${enrollment.createdAt.toLocaleString('ru-RU')}`
+			].join('\n'))
 			await ctx.api.sendMessage(
 				Number(enrollment.user.telegramId),
-				`❌ *Kursga yozilish rad etildi.*\n\nKurs: *${enrollment.course.title}*`,
+				atext(ctx, `❌ *Kursga yozilish rad etildi.*\n\nKurs: *${enrollment.course.title}*`, `❌ *Ваша запись на курс отклонена.*\n\nКурс: *${enrollment.course.title}*`),
 				{ parse_mode: 'Markdown' }
 			)
 		} catch (err) {
 			logger.error({ err }, 'Course enrollment reject failed')
-			await ctx.reply('Xatolik yuz berdi.')
+			await ctx.reply(atext(ctx, 'Xatolik yuz berdi.', 'Произошла ошибка.'))
+		}
+	})
+
+
+	bot.callbackQuery(/^AD\|REVIEW\|/, async ctx => {
+		if (!isAdmin(ctx.from?.id)) return
+		try {
+			await ctx.answerCallbackQuery()
+			const applicationId = ctx.callbackQuery.data.split('|')[2]
+			const application = await applicationService.getById(applicationId)
+			if (!application) {
+				await ctx.reply(atext(ctx, 'Ariza topilmadi.', 'Заявка не найдена.'))
+				return
+			}
+			await prisma.application.update({
+				where: { id: applicationId },
+				data: { status: 'IN_PROGRESS', reviewedAt: new Date(), reviewedBy: BigInt(ctx.from!.id) }
+			})
+			await ctx.api.sendMessage(
+				Number(application.telegramId),
+				atext(ctx, `👀 *Arizangiz ko‘rib chiqilmoqda.*\n\nNatija bo‘yicha siz bilan tez orada bog‘lanamiz.`, `👀 *Ваша заявка находится на рассмотрении.*\n\nМы свяжемся с вами после проверки.`),
+				{ parse_mode: 'Markdown' }
+			)
+			await ctx.reply(atext(ctx, '✅ Foydalanuvchiga “ko‘rib chiqilmoqda” xabari yuborildi.', '✅ Пользователю отправлено сообщение «на рассмотрении».'))
+		} catch (err) {
+			logger.error({ err }, 'Application review notify failed')
+			await ctx.reply(atext(ctx, 'Xatolik yuz berdi.', 'Произошла ошибка.'))
 		}
 	})
 
@@ -115,12 +182,36 @@ export function setupAdminHandlers(bot: Bot<BotContext>): void {
 
 			ctx.session.temp.approvedApplicationId = applicationId
 			ctx.session.temp.waitingFor = undefined
-			await ctx.reply('Foydalanuvchiga yuboriladigan kelish vaqtini tanlang.', {
-				reply_markup: scheduleKeyboard(applicationId)
+			await ctx.reply(atext(ctx, 'Ariza qabul qilindi. Foydalanuvchiga qo‘shimcha xabar yuborasizmi?', 'Заявка принята. Отправить пользователю дополнительное сообщение?'), {
+				reply_markup: new InlineKeyboard()
+					.text(atext(ctx, '✍️ Xabar yozish', '✍️ Написать сообщение'), `AD|APPMSG|${applicationId}|WRITE`)
+					.row()
+					.text(atext(ctx, '⏭ O‘tkazib yuborish', '⏭ Пропустить'), `AD|APPMSG|${applicationId}|SKIP`)
 			})
 		} catch (err) {
 			logger.error({ err }, 'Application approve prompt failed')
-			await ctx.reply('Xatolik yuz berdi.')
+			await ctx.reply(atext(ctx, 'Xatolik yuz berdi.', 'Произошла ошибка.'))
+		}
+	})
+
+	bot.callbackQuery(/^AD\|APPMSG\|/, async ctx => {
+		if (!isAdmin(ctx.from?.id)) return
+		try {
+			await ctx.answerCallbackQuery()
+			const [, , applicationId, mode] = ctx.callbackQuery.data.split('|')
+			if (mode === 'WRITE') {
+				ctx.session.temp.approvedApplicationId = applicationId
+				ctx.session.temp.waitingFor = 'approval_message'
+				await ctx.reply(atext(ctx, 'Foydalanuvchiga yuboriladigan xabarni yozing.', 'Напишите сообщение для пользователя.'))
+				return
+			}
+			await sendApplicationApprovedMessage(ctx, applicationId)
+			ctx.session.temp.approvedApplicationId = undefined
+			ctx.session.temp.waitingFor = undefined
+			await ctx.reply(atext(ctx, '✅ Ariza qabul qilindi va foydalanuvchiga xabar yuborildi.', '✅ Заявка принята и сообщение пользователю отправлено.'))
+		} catch (err) {
+			logger.error({ err }, 'Approval message callback failed')
+			await ctx.reply(atext(ctx, 'Xatolik yuz berdi.', 'Произошла ошибка.'))
 		}
 	})
 
@@ -133,28 +224,26 @@ export function setupAdminHandlers(bot: Bot<BotContext>): void {
 			if (mode === 'CUSTOM') {
 				ctx.session.temp.approvedApplicationId = applicationId
 				ctx.session.temp.waitingFor = 'custom_schedule'
-				await ctx.reply('Kelish vaqtini matn ko‘rinishida yuboring. Masalan: ertaga 10:00 ga keling.')
+				await ctx.reply(atext(ctx, 'Kelish vaqtini matn ko‘rinishida yuboring. Masalan: ertaga 10:00 ga keling.', 'Отправьте время прихода текстом. Например: приходите завтра в 10:00.'))
 				return
 			}
 
-			const textMap: Record<string, string> = {
-				TODAY: 'Kelish vaqti: *bugun*.',
-				TOMORROW: 'Kelish vaqti: *ertaga*.',
-				THREE_DAYS: 'Kelish vaqti: *3 kundan keyin*.'
-			}
+			const textMap: Record<string, string> = getUserLang(ctx) === 'ru'
+				? { TODAY: 'Время прихода: *сегодня*.', TOMORROW: 'Время прихода: *завтра*.', THREE_DAYS: 'Время прихода: *через 3 дня*.' }
+				: { TODAY: 'Kelish vaqti: *bugun*.', TOMORROW: 'Kelish vaqti: *ertaga*.', THREE_DAYS: 'Kelish vaqti: *3 kundan keyin*.' }
 			const text = textMap[mode]
 			if (!text) {
-				await ctx.reply('Noto‘g‘ri tanlov.')
+				await ctx.reply(atext(ctx, 'Noto‘g‘ri tanlov.', 'Неверный выбор.'))
 				return
 			}
 
 			await sendApplicationApprovedMessage(ctx, applicationId, text)
 			ctx.session.temp.approvedApplicationId = undefined
 			ctx.session.temp.waitingFor = undefined
-			await ctx.reply('✅ Foydalanuvchiga xabar yuborildi.')
+			await ctx.reply(atext(ctx, '✅ Foydalanuvchiga xabar yuborildi.', '✅ Сообщение отправлено пользователю.'))
 		} catch (err) {
 			logger.error({ err }, 'Schedule callback failed')
-			await ctx.reply('Xatolik yuz berdi.')
+			await ctx.reply(atext(ctx, 'Xatolik yuz berdi.', 'Произошла ошибка.'))
 		}
 	})
 
@@ -171,10 +260,10 @@ export function setupAdminHandlers(bot: Bot<BotContext>): void {
 				.text('Hujjat yetishmaydi', `AD|REJ_R|${applicationId}|DOCS_MISSING`)
 				.row()
 				.text('Boshqa', `AD|REJ_R|${applicationId}|OTHER`)
-			await ctx.reply('Rad etish sababini tanlang.', { reply_markup: kb })
+			await ctx.reply(atext(ctx, 'Rad etish sababini tanlang.', 'Выберите причину отказа.'), { reply_markup: kb })
 		} catch (err) {
 			logger.error({ err }, 'Reject prompt failed')
-			await ctx.reply('Xatolik yuz berdi.')
+			await ctx.reply(atext(ctx, 'Xatolik yuz berdi.', 'Произошла ошибка.'))
 		}
 	})
 
@@ -211,7 +300,7 @@ export function setupAdminHandlers(bot: Bot<BotContext>): void {
 			await ctx.editMessageText(`❌ Ariza rad etildi.\nSabab: ${reason}`)
 		} catch (err) {
 			logger.error({ err }, 'Reject handler failed')
-			await ctx.reply('Xatolik yuz berdi.')
+			await ctx.reply(atext(ctx, 'Xatolik yuz berdi.', 'Произошла ошибка.'))
 		}
 	})
 }

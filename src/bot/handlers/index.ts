@@ -3,6 +3,7 @@ import { type BotContext } from '../bot'
 import { logger } from '../../utils/logger'
 import { handleStartChoice, showStartMenu } from '../start.menu'
 import { tryHandleAdminText } from './admin'
+import { hasActiveConversations } from '../helpers/conversation.helper'
 
 export function setupHandlers(bot: Bot<BotContext>): void {
   bot.on('callback_query:data', async (ctx, next) => {
@@ -10,8 +11,7 @@ export function setupHandlers(bot: Bot<BotContext>): void {
       const data = ctx.callbackQuery.data
       logger.debug({ data, userId: ctx.from?.id }, 'Callback query received')
 
-      const activeConversations = await ctx.conversation.active()
-      if (activeConversations.length > 0) {
+      if (await hasActiveConversations(ctx)) {
         return next()
       }
 
@@ -42,8 +42,7 @@ export function setupHandlers(bot: Bot<BotContext>): void {
 
   bot.on('message:text', async (ctx, next) => {
     try {
-      const activeConversations = await ctx.conversation.active()
-      if (activeConversations.length > 0) {
+      if (await hasActiveConversations(ctx)) {
         return next()
       }
 
@@ -62,8 +61,7 @@ export function setupHandlers(bot: Bot<BotContext>): void {
   for (const updateType of ['message:contact', 'message:photo', 'message:document', 'message:voice', 'message:video', 'message:sticker'] as const) {
     bot.on(updateType, async (ctx, next) => {
       try {
-        const activeConversations = await ctx.conversation.active()
-        if (activeConversations.length > 0) {
+        if (await hasActiveConversations(ctx)) {
           return next()
         }
         await ctx.reply("Iltimos, /start buyrug‘i bilan boshlang.")
@@ -75,8 +73,7 @@ export function setupHandlers(bot: Bot<BotContext>): void {
 
   bot.on('message', async (ctx, next) => {
     try {
-      const activeConversations = await ctx.conversation.active()
-      if (activeConversations.length > 0) {
+      if (await hasActiveConversations(ctx)) {
         return next()
       }
       logger.warn({ messageType: ctx.message, userId: ctx.from?.id }, 'Unhandled message type')

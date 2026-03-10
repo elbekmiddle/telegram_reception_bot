@@ -1,5 +1,5 @@
 import { InlineKeyboard } from 'grammy'
-import { FileType } from '@prisma/client'
+import { FileType } from '../generated/prisma/client'
 
 import { type BotContext } from '../bot/bot'
 import { applicationRepo } from '../db/repositories/application.repo'
