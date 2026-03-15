@@ -1,49 +1,40 @@
-// src/bot/middlewares/rateLimit.ts
 import { type Middleware } from 'grammy'
 import { type BotContext } from '../bot'
-import { RateLimit } from '../../config/constants'
 import { logger } from '../../utils/logger'
-
-interface RateLimitStore {
-	[key: string]: {
-		count: number
-		resetAt: number
-	}
-}
-
-const store: RateLimitStore = {}
+import { env } from '../../config/env'
+import { query } from '../../db/pg'
 
 export const rateLimitMiddleware: Middleware<BotContext> = async (ctx, next) => {
-	// Callback querylarni rate limitdan o'tkazib yuboramiz
-	if (ctx.callbackQuery) {
+	if (ctx.callbackQuery || !ctx.from) {
 		return next()
 	}
 
-	if (!ctx.from) return next()
+	const key = String(ctx.from.id)
+	const result = await query<{ count: number }>(
+		`INSERT INTO rate_limits (bucket, count, window_started_at, expires_at)
+     VALUES ($1, 1, now(), now() + ($2::text || ' milliseconds')::interval)
+     ON CONFLICT (bucket) DO UPDATE SET
+       count = CASE
+         WHEN rate_limits.expires_at < now() THEN 1
+         ELSE rate_limits.count + 1
+       END,
+       window_started_at = CASE
+         WHEN rate_limits.expires_at < now() THEN now()
+         ELSE rate_limits.window_started_at
+       END,
+       expires_at = CASE
+         WHEN rate_limits.expires_at < now() THEN now() + ($2::text || ' milliseconds')::interval
+         ELSE rate_limits.expires_at
+       END
+     RETURNING count`,
+		[key, env.RATE_LIMIT_WINDOW_MS]
+	)
 
-	const key = `rate:${ctx.from.id}`
-	const now = Date.now()
-
-	// Clean old entries
-	if (store[key] && store[key].resetAt < now) {
-		delete store[key]
-	}
-
-	// Check rate limit
-	if (store[key] && store[key].count >= RateLimit.MESSAGE_COUNT) {
-		logger.warn({ telegramId: ctx.from.id }, 'Rate limit exceeded')
+	const count = result.rows[0]?.count ?? 0
+	if (count > env.RATE_LIMIT_MAX) {
+		logger.warn({ telegramId: ctx.from.id, count }, 'Rate limit exceeded')
 		await ctx.reply("Juda ko'p so'rov yubordingiz. Biroz kuting.")
 		return
-	}
-
-	// Update counter
-	if (!store[key]) {
-		store[key] = {
-			count: 1,
-			resetAt: now + RateLimit.TIME_WINDOW
-		}
-	} else {
-		store[key].count++
 	}
 
 	await next()
