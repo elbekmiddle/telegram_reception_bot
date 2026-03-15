@@ -2879,7 +2879,7 @@ async function handleBlogInput(
 		ctx,
 		adminText(ctx, '📸 Instagram blog havolasini yuboring:\n\nMasalan: https://instagram.com/your.page', '📸 Отправьте ссылку на Instagram:\n\nНапример: https://instagram.com/your.page')
 	)
-	runtimeSettingsService.update({ instagramUrl: value.trim() })
+	await runtimeSettingsService.update({ instagramUrl: value.trim() })
 	await ctx.reply(adminText(ctx, '✅ Havola saqlandi.', '✅ Ссылка сохранена.'))
 	ctx.session.flowState = { step: 'idle' }
 }

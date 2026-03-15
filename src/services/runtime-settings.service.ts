@@ -1,5 +1,5 @@
-import fs from 'node:fs'
-import path from 'node:path'
+import { query } from '../db/pg'
+import { logger } from '../utils/logger'
 
 export type RuntimeSettings = {
 	instagramUrl?: string
@@ -7,33 +7,50 @@ export type RuntimeSettings = {
 	contactText?: string
 }
 
-const dataDir = path.join(process.cwd(), 'data')
-const filePath = path.join(dataDir, 'runtime-settings.json')
-
-function ensureFile() {
-	if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true })
-	if (!fs.existsSync(filePath)) {
-		fs.writeFileSync(filePath, JSON.stringify({}, null, 2), 'utf8')
-	}
-}
-
 export class RuntimeSettingsService {
-	get(): RuntimeSettings {
-		try {
-			ensureFile()
-			const raw = fs.readFileSync(filePath, 'utf8')
-			return raw ? (JSON.parse(raw) as RuntimeSettings) : {}
-		} catch {
-			return {}
-		}
+	private cache: RuntimeSettings = {}
+	private initialized = false
+
+	async initialize(): Promise<void> {
+		if (this.initialized) return
+		await this.reload()
+		this.initialized = true
 	}
 
-	update(patch: Partial<RuntimeSettings>): RuntimeSettings {
-		const current = this.get()
-		const next = { ...current, ...patch }
-		ensureFile()
-		fs.writeFileSync(filePath, JSON.stringify(next, null, 2), 'utf8')
-		return next
+	async reload(): Promise<void> {
+		const result = await query<{ key: string; value: string }>(
+			'SELECT key, value FROM runtime_settings WHERE namespace = $1',
+			['bot']
+		)
+		const next: RuntimeSettings = {}
+		for (const row of result.rows) {
+			if (row.key === 'instagramUrl') next.instagramUrl = row.value
+			if (row.key === 'aboutText') next.aboutText = row.value
+			if (row.key === 'contactText') next.contactText = row.value
+		}
+		this.cache = next
+	}
+
+	get(): RuntimeSettings {
+		return this.cache
+	}
+
+	async update(patch: Partial<RuntimeSettings>): Promise<RuntimeSettings> {
+		this.cache = { ...this.cache, ...patch }
+		await this.persist(patch)
+		return this.cache
+	}
+
+	private async persist(patch: Partial<RuntimeSettings>): Promise<void> {
+		for (const [key, value] of Object.entries(patch)) {
+			await query(
+				`INSERT INTO runtime_settings(namespace, key, value, updated_at)
+         VALUES ($1, $2, $3, now())
+         ON CONFLICT(namespace, key) DO UPDATE
+         SET value = EXCLUDED.value, updated_at = now()`,
+				['bot', key, value ?? '']
+			)
+		}
 	}
 }
 

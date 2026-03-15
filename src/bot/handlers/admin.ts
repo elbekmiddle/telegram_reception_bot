@@ -3,8 +3,13 @@ import { InlineKeyboard } from 'grammy'
 
 import { type BotContext } from '../bot'
 import { applicationService } from '../../services/application.service'
-import { prisma } from '../../db/prisma'
 import { logger } from '../../utils/logger'
+import {
+	claimAdminAction,
+	getApplicationTelegramId,
+	transitionApplicationStatus,
+	transitionEnrollmentStatus
+} from '../../modules/admin/admin-actions.dao'
 import { getUserLang } from '../../utils/i18n'
 
 
@@ -40,15 +45,15 @@ function scheduleKeyboard(applicationId: string) {
 }
 
 async function sendApplicationApprovedMessage(ctx: BotContext, applicationId: string, text?: string) {
-	const application = await prisma.application.findUnique({ where: { id: applicationId } })
-	if (!application) {
+	const telegramId = await getApplicationTelegramId(applicationId)
+	if (!telegramId) {
 		await ctx.reply('Ariza topilmadi.')
 		return
 	}
 
 	const base = getUserLang(ctx) === 'ru' ? '✅ Ваша заявка принята.' : '✅ Arizangiz qabul qilindi.'
 	const message = text ? `${base}\n\n${text}` : base
-	await ctx.api.sendMessage(Number(application.telegramId), message)
+	await ctx.api.sendMessage(Number(telegramId), message)
 }
 
 export async function tryHandleAdminText(ctx: BotContext): Promise<boolean> {
@@ -90,22 +95,25 @@ export function setupAdminHandlers(bot: Bot<BotContext>): void {
 		try {
 			await ctx.answerCallbackQuery()
 			const enrollmentId = ctx.callbackQuery.data.split('|')[2]
-			const enrollment = await prisma.courseEnrollment.update({
-				where: { id: enrollmentId },
-				data: { status: 'APPROVED' },
-				include: { user: true, course: true }
-			})
+			const actionClaimed = await claimAdminAction(`ce:approve:${enrollmentId}`)
+			if (!actionClaimed) return
+
+			const enrollment = await transitionEnrollmentStatus({ enrollmentId, nextStatus: 'APPROVED' })
+			if (enrollment.kind === 'not_found') {
+				await ctx.reply(atext(ctx, 'Yozilish topilmadi.', 'Запись не найдена.'))
+				return
+			}
 
 			await ctx.editMessageText([
-				`📝 ${enrollment.course.title}`,
-				`${atext(ctx, '👤 F.I.Sh', '👤 Ф.И.О')}: ${enrollment.fullName || userDisplayName(enrollment.user)}`,
+				`📝 ${enrollment.courseTitle}`,
+				`${atext(ctx, '👤 F.I.Sh', '👤 Ф.И.О')}: ${enrollment.fullName || '—'}`,
 				`📞 ${atext(ctx, 'Telefon', 'Телефон')}: ${enrollment.phone || '—'}`,
 				`📍 ${atext(ctx, 'Holat', 'Статус')}: ${enrollmentStatusPretty(ctx, 'APPROVED')}`,
-				`🗓 ${atext(ctx, 'Sana', 'Дата')}: ${enrollment.createdAt.toLocaleString('ru-RU')}`
+				`🗓 ${atext(ctx, 'Sana', 'Дата')}: ${new Date(enrollment.createdAt).toLocaleString('ru-RU')}`
 			].join('\n'))
 			await ctx.api.sendMessage(
-				Number(enrollment.user.telegramId),
-				atext(ctx, `✅ *Kursga yozilish qabul qilindi!*\n\nKurs: *${enrollment.course.title}*`, `✅ *Ваша запись на курс принята!*\n\nКурс: *${enrollment.course.title}*`),
+				Number(enrollment.telegramId),
+				atext(ctx, `✅ *Kursga yozilish qabul qilindi!*\n\nKurs: *${enrollment.courseTitle}*`, `✅ *Ваша запись на курс принята!*\n\nКурс: *${enrollment.courseTitle}*`),
 				{ parse_mode: 'Markdown' }
 			)
 		} catch (err) {
@@ -119,22 +127,24 @@ export function setupAdminHandlers(bot: Bot<BotContext>): void {
 		try {
 			await ctx.answerCallbackQuery()
 			const enrollmentId = ctx.callbackQuery.data.split('|')[2]
-			const enrollment = await prisma.courseEnrollment.update({
-				where: { id: enrollmentId },
-				data: { status: 'REJECTED' },
-				include: { user: true, course: true }
-			})
+			const actionClaimed = await claimAdminAction(`ce:reject:${enrollmentId}`)
+			if (!actionClaimed) return
+			const enrollment = await transitionEnrollmentStatus({ enrollmentId, nextStatus: 'REJECTED' })
+			if (enrollment.kind === 'not_found') {
+				await ctx.reply(atext(ctx, 'Yozilish topilmadi.', 'Запись не найдена.'))
+				return
+			}
 
 			await ctx.editMessageText([
-				`📝 ${enrollment.course.title}`,
-				`${atext(ctx, '👤 F.I.Sh', '👤 Ф.И.О')}: ${enrollment.fullName || userDisplayName(enrollment.user)}`,
+				`📝 ${enrollment.courseTitle}`,
+				`${atext(ctx, '👤 F.I.Sh', '👤 Ф.И.О')}: ${enrollment.fullName || '—'}`,
 				`📞 ${atext(ctx, 'Telefon', 'Телефон')}: ${enrollment.phone || '—'}`,
 				`📍 ${atext(ctx, 'Holat', 'Статус')}: ${enrollmentStatusPretty(ctx, 'REJECTED')}`,
-				`🗓 ${atext(ctx, 'Sana', 'Дата')}: ${enrollment.createdAt.toLocaleString('ru-RU')}`
+				`🗓 ${atext(ctx, 'Sana', 'Дата')}: ${new Date(enrollment.createdAt).toLocaleString('ru-RU')}`
 			].join('\n'))
 			await ctx.api.sendMessage(
-				Number(enrollment.user.telegramId),
-				atext(ctx, `❌ *Kursga yozilish rad etildi.*\n\nKurs: *${enrollment.course.title}*`, `❌ *Ваша запись на курс отклонена.*\n\nКурс: *${enrollment.course.title}*`),
+				Number(enrollment.telegramId),
+				atext(ctx, `❌ *Kursga yozilish rad etildi.*\n\nKurs: *${enrollment.courseTitle}*`, `❌ *Ваша запись на курс отклонена.*\n\nКурс: *${enrollment.courseTitle}*`),
 				{ parse_mode: 'Markdown' }
 			)
 		} catch (err) {
@@ -154,9 +164,12 @@ export function setupAdminHandlers(bot: Bot<BotContext>): void {
 				await ctx.reply(atext(ctx, 'Ariza topilmadi.', 'Заявка не найдена.'))
 				return
 			}
-			await prisma.application.update({
-				where: { id: applicationId },
-				data: { status: 'IN_PROGRESS', reviewedAt: new Date(), reviewedBy: BigInt(ctx.from!.id) }
+			const actionClaimed = await claimAdminAction(`ad:review:${applicationId}`)
+			if (!actionClaimed) return
+			await transitionApplicationStatus({
+				applicationId,
+				adminTelegramId: ctx.from!.id,
+				nextStatus: 'IN_PROGRESS'
 			})
 			await ctx.api.sendMessage(
 				Number(application.telegramId),
@@ -175,10 +188,17 @@ export function setupAdminHandlers(bot: Bot<BotContext>): void {
 		try {
 			await ctx.answerCallbackQuery()
 			const applicationId = ctx.callbackQuery.data.split('|')[2]
-			await prisma.application.update({
-				where: { id: applicationId },
-				data: { status: 'APPROVED', reviewedAt: new Date(), reviewedBy: BigInt(ctx.from!.id) }
+			const actionClaimed = await claimAdminAction(`ad:approve:${applicationId}`)
+			if (!actionClaimed) return
+			const transition = await transitionApplicationStatus({
+				applicationId,
+				adminTelegramId: ctx.from!.id,
+				nextStatus: 'APPROVED'
 			})
+			if (transition.kind === 'not_found') {
+				await ctx.reply(atext(ctx, 'Ariza topilmadi.', 'Заявка не найдена.'))
+				return
+			}
 
 			ctx.session.temp.approvedApplicationId = applicationId
 			ctx.session.temp.waitingFor = undefined
@@ -279,15 +299,18 @@ export function setupAdminHandlers(bot: Bot<BotContext>): void {
 				OTHER: 'Boshqa sabab'
 			}
 			const reason = reasonMap[reasonCode] ?? 'Boshqa sabab'
-			await prisma.application.update({
-				where: { id: applicationId },
-				data: {
-					status: 'REJECTED',
-					reviewedAt: new Date(),
-					reviewedBy: BigInt(ctx.from!.id),
-					rejectionReason: reason
-				}
+			const actionClaimed = await claimAdminAction(`ad:reject:${applicationId}:${reasonCode}`)
+			if (!actionClaimed) return
+			const transition = await transitionApplicationStatus({
+				applicationId,
+				adminTelegramId: ctx.from!.id,
+				nextStatus: 'REJECTED',
+				rejectionReason: reason
 			})
+			if (transition.kind === 'not_found') {
+				await ctx.reply(atext(ctx, 'Ariza topilmadi.', 'Заявка не найдена.'))
+				return
+			}
 
 			const application = await applicationService.getById(applicationId)
 			if (application) {

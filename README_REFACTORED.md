@@ -1,78 +1,32 @@
-# Telegram Reception Bot - Refactored Version
+# Production hardening notes
 
-## Yangi o'zgarishlar
+## What was changed
+- Webhook-first boot flow (`USE_WEBHOOK=true`) with polling fallback for local development.
+- Postgres-backed distributed session and distributed rate-limit middleware (multi-instance safe).
+- Postgres-based idempotency (`processed_updates` + `processed_actions`) to avoid duplicate Telegram retries and duplicate callback actions.
+- Runtime settings moved from local JSON to Postgres table (`runtime_settings`) with in-memory cache.
+- Added SQL hardening scripts with indexes and unique guard for single active IN_PROGRESS application.
+- Added k6 webhook load-test script.
+- Added DB cleanup script for dedupe/session/rate-limit tables.
 
-### 1. Ma'lumotlar bazasi strukturasi
-- **Vakansiya**: faqat nomi va maoshi (text)
-- **Savol**: har bir vakansiya uchun 6tagacha savol
-- **Variant**: har bir savol uchun 6tagacha variant
-- **Savol turlari**: TEXT, SINGLE_SELECT, MULTI_SELECT
-
-### 2. Ariza berish oqimi (Foydalanuvchilar)
-Foydalanuvchi faqat **3ta ma'lumot** kiritadi:
-1. **Ism-familiya**
-2. **Telefon raqam** (requestContact tugmasi)
-3. **Rasm** (beldan yuqori, yuz bilan)
-
-Keyin vakansiyaga tegishli savollar dinamik ravishda so'raladi.
-
-### 3. Rasm yuklash
-- Rasm cheklovi yo'q
-- Demo rasm ko'rsatiladi
-- Yuz detection kerak bo'ladi
-
-### 4. Admin panel
-- Vakansiya yaratish/tahrirlash
-- Kurs yaratish/tahrirlash  
-- Ariza ko'rish va tasdiqlash
-- 5tadan ko'rsatish
-
-## O'rnatish
-
-### 1. Prisma migration
+## Apply DB scripts
 ```bash
-cd telegram-reception-bot-refactored
+psql "$DATABASE_URL" -f sql/001_hardening.sql
+```
+
+(Optional cleanup cron)
+```bash
+psql "$DATABASE_URL" -f sql/002_cleanup.sql
+```
+
+## Run
+```bash
 npm install
-npx prisma generate
-npx prisma migrate deploy
+npm run build
+npm start
 ```
 
-### 2. Environment o'zgartirish kerak emas
-Hamma env o'zgaruvchilar avvalgidek ishlaydi.
-
-### 3. Botni ishga tushirish
+## Load test
 ```bash
-npm run dev
+k6 run load-test/webhook.k6.js -e BASE_URL=http://localhost:4000 -e WEBHOOK_PATH=/telegram/webhook
 ```
-
-## Fayllar
-
-### Yangi fayllar:
-- `src/bot/conversations/flow-helpers.ts` - Helper funksiyalar
-- `src/services/vacancy.service.ts` - To'liq qayta yozildi
-- `src/services/course.service.ts` - To'liq qayta yozildi
-- `src/bot/conversations/application.flow.ts` - Soddalashtirildi
-- `prisma/schema.prisma` - Yangilandi
-- `prisma/migrations/...` - Yangi migration
-
-### O'zgartirilgan fayllar:
-- `src/bot/conversations/admin.flow.ts` - To'liq qayta yozish kerak
-
-## Xususiyatlar
-
-✅ Foydalanuvchi uchun sodda interfeys
-✅ Dinamik savollar (vakansiyaga bog'liq)
-✅ Demo rasm ko'rsatish
-✅ 3x yaratish bugini hal qilindi
-✅ 5tadan ko'rsatish
-✅ Oddiy va aniq callback nomlari
-
-## Keyingi qadamlar
-
-Admin flow ni to'liq yozish kerak:
-1. Vakansiya CRUD
-2. Kurs CRUD
-3. Ariza ko'rish
-4. Kurs yozilishini ko'rish
-
-Batafsil ma'lumot uchun `REFACTORING_PLAN.md` ga qarang.

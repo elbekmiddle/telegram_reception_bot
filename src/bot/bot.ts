@@ -8,6 +8,7 @@ import { logger } from '../utils/logger'
 import { sessionMiddleware } from './middlewares/session'
 import { authMiddleware } from './middlewares/auth'
 import { rateLimitMiddleware } from './middlewares/rateLimit'
+import { updateDedupeMiddleware } from './middlewares/updateDedupe'
 import { setupCommands } from './commands'
 import { setupHandlers } from './handlers'
 import { setupAdminHandlers } from './handlers/admin'
@@ -18,21 +19,15 @@ import { handleStartChoice } from './start.menu'
 import type { SessionData } from '../types/session'
 import { setDirectBot } from './conversations/direct-api'
 import { UserFromGetMe } from 'grammy/types'
-
-type BotState = {
-	telegramId?: number
-	applicationId?: string
-	inProgress?: boolean
-}
+import { runtimeSettingsService } from '../services/runtime-settings.service'
 
 export type BotContext = GrammyContext &
 	SessionFlavor<SessionData> &
-	ConversationFlavor & {
-		state: Partial<BotState>
-	}
+	ConversationFlavor & { state: { correlationId?: string } }
 
 const stateMiddleware: MiddlewareFn<BotContext> = async (ctx, next) => {
-	;(ctx as unknown as { state?: Partial<BotState> }).state ??= {}
+	;(ctx as unknown as { state?: { correlationId?: string } }).state ??= {}
+	ctx.state.correlationId = `upd-${ctx.update.update_id}`
 	await next()
 }
 
@@ -41,22 +36,7 @@ setDirectBot(bot)
 
 let botInfoCache: UserFromGetMe | null = null
 let healthServerStarted = false
-let pollingStarted = false
-
-function getSafeBotInfo(): UserFromGetMe | null {
-	return botInfoCache
-}
-
-function isBotReady(): boolean {
-	return botInfoCache !== null
-}
-
-// MUHIM ORDER:
-// 1. Session
-// 2. Conversations
-// 3. Rate limit
-// 4. Auth
-// 5. Commands va Handlers
+let updatesStarted = false
 
 bot.use(stateMiddleware)
 bot.use(sessionMiddleware)
@@ -66,6 +46,7 @@ bot.use(createConversation(applicationFlow, 'applicationFlow'))
 bot.use(createConversation(adminFlow, 'adminFlow'))
 bot.use(createConversation(courseFlow, 'courseFlow'))
 
+bot.use(updateDedupeMiddleware)
 bot.use(rateLimitMiddleware)
 bot.use(authMiddleware)
 
@@ -93,149 +74,106 @@ bot.catch(err => {
 	logger.error({ err }, 'Unhandled bot error')
 })
 
-// Health check server
 const app = express()
-const PORT = Number(process.env.PORT || '4000')
+app.use(express.json({ limit: '512kb' }))
 
 app.get('/health', (_req: Request, res: Response) => {
-	const info = getSafeBotInfo()
-
 	res.status(200).json({
 		status: 'OK',
 		timestamp: new Date().toISOString(),
 		uptime: process.uptime(),
-		bot: {
-			status: pollingStarted ? 'running' : 'starting',
-			initialized: isBotReady(),
-			username: info?.username ?? 'unknown',
-			id: info?.id ?? 'unknown'
-		},
-		environment: env.NODE_ENV,
-		version: process.version,
-		memory: process.memoryUsage()
+		botInitialized: botInfoCache !== null,
+		updatesStarted
 	})
 })
 
 app.get('/ready', (_req: Request, res: Response) => {
-	const info = getSafeBotInfo()
-	const ready = isBotReady()
-
-	res.status(ready ? 200 : 503).json({
-		status: ready ? 'READY' : 'NOT_READY',
-		timestamp: new Date().toISOString(),
-		bot: {
-			status: ready ? 'ready' : 'initializing',
-			username: info?.username ?? null
-		}
-	})
+	const ready = botInfoCache !== null && updatesStarted
+	res.status(ready ? 200 : 503).json({ status: ready ? 'READY' : 'NOT_READY' })
 })
 
 app.get('/live', (_req: Request, res: Response) => {
-	res.status(200).json({
-		status: 'ALIVE',
-		timestamp: new Date().toISOString()
-	})
+	res.status(200).json({ status: 'ALIVE' })
 })
 
 app.get('/metrics', (_req: Request, res: Response) => {
-	const info = getSafeBotInfo()
-
 	res.status(200).json({
 		uptime: process.uptime(),
 		memoryUsage: process.memoryUsage(),
-		cpuUsage: process.cpuUsage(),
-		botStats: {
-			startTime: new Date(Date.now() - process.uptime() * 1000).toISOString(),
-			botUsername: info?.username ?? null,
-			botId: info?.id ?? null,
-			initialized: isBotReady(),
-			pollingStarted
-		}
+		cpuUsage: process.cpuUsage()
 	})
 })
 
-app.get('/', (_req: Request, res: Response) => {
-	const info = getSafeBotInfo()
-
-	res.status(200).json({
-		message: 'Telegram Reception Bot API',
-		version: '1.0.0',
-		endpoints: {
-			health: '/health',
-			ready: '/ready',
-			live: '/live',
-			metrics: '/metrics'
-		},
-		bot: {
-			username: info?.username ?? null,
-			status: pollingStarted ? 'running' : 'starting'
-		}
-	})
-})
-
-function startHealthServer(): void {
+function startHttpServer(): void {
 	if (healthServerStarted) return
-
-	app.listen(PORT, () => {
-		logger.info(`✅ Health server running on port ${PORT}`)
-		logger.info(`   Health endpoint: http://localhost:${PORT}/health`)
-		logger.info(`   Ready endpoint: http://localhost:${PORT}/ready`)
-		logger.info(`   Live endpoint: http://localhost:${PORT}/live`)
-		logger.info(`   Metrics endpoint: http://localhost:${PORT}/metrics`)
+	app.listen(env.PORT, () => {
+		logger.info(`HTTP server listening on :${env.PORT}`)
 	})
-
 	healthServerStarted = true
 }
 
-export async function startBot(): Promise<void> {
-	try {
-		startHealthServer()
+async function startWebhookMode(): Promise<void> {
+	if (!env.WEBHOOK_URL) {
+		throw new Error('WEBHOOK_URL is required in webhook mode')
+	}
 
-		// bot.botInfo ishlatishdan oldin init qilish shart
-		await bot.init()
-		botInfoCache = bot.botInfo
-
-		
-		logger.info(`✅ Bot initialized: @${bot.botInfo.username}`)
-			
-		try {
-			await bot.api.deleteWebhook({ drop_pending_updates: false })
-			logger.info('✅ Existing webhook cleared')
-		} catch (error) {
-			logger.warn({ error }, 'Webhook clear skipped/failed')
+	app.post(env.WEBHOOK_PATH, async (req: Request, res: Response) => {
+		if (env.WEBHOOK_SECRET_TOKEN) {
+			const header = req.header('x-telegram-bot-api-secret-token')
+			if (header !== env.WEBHOOK_SECRET_TOKEN) {
+				res.status(401).json({ ok: false })
+				return
+			}
 		}
 
-		await bot.start({
-			onStart: info => {
-				pollingStarted = true
-				logger.info(
-					env.NODE_ENV === 'development'
-						? `✅ Bot started (polling): @${info.username}`
-						: `✅ Bot started (polling/prod): @${info.username}`
-				)
-			}
-		})
-	} catch (error) {
-		logger.error({ error }, 'Failed to start bot')
-		process.exit(1)
+		try {
+			await bot.handleUpdate(req.body)
+			res.status(200).json({ ok: true })
+		} catch (error) {
+			logger.error({ error }, 'Webhook update processing failed')
+			res.status(500).json({ ok: false })
+		}
+	})
+
+	await bot.api.setWebhook(`${env.WEBHOOK_URL}${env.WEBHOOK_PATH}`, {
+		secret_token: env.WEBHOOK_SECRET_TOKEN,
+		drop_pending_updates: false,
+		allowed_updates: ['message', 'callback_query']
+	})
+
+	updatesStarted = true
+	logger.info({ url: `${env.WEBHOOK_URL}${env.WEBHOOK_PATH}` }, 'Webhook mode enabled')
+}
+
+async function startPollingMode(): Promise<void> {
+	await bot.api.deleteWebhook({ drop_pending_updates: false })
+	await bot.start({
+		onStart: info => {
+			updatesStarted = true
+			logger.info({ username: info.username }, 'Polling mode enabled')
+		}
+	})
+}
+
+export async function startBot(): Promise<void> {
+	startHttpServer()
+	await runtimeSettingsService.initialize()
+	await bot.init()
+	botInfoCache = bot.botInfo
+	logger.info({ username: bot.botInfo.username }, 'Bot initialized')
+
+	if (env.USE_WEBHOOK) {
+		await startWebhookMode()
+	} else {
+		await startPollingMode()
 	}
 }
 
-// Graceful shutdown
-process.on('SIGTERM', async () => {
-	logger.info('SIGTERM received, shutting down gracefully...')
-	try {
-		await bot.stop()
-	} finally {
-		process.exit(0)
-	}
-})
+async function shutdown(signal: string): Promise<void> {
+	logger.info({ signal }, 'Shutdown signal received')
+	await bot.stop()
+	process.exit(0)
+}
 
-process.on('SIGINT', async () => {
-	logger.info('SIGINT received, shutting down gracefully...')
-	try {
-		await bot.stop()
-	} finally {
-		process.exit(0)
-	}
-})
+process.on('SIGTERM', () => void shutdown('SIGTERM'))
+process.on('SIGINT', () => void shutdown('SIGINT'))
