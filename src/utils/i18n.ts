@@ -36,7 +36,7 @@ const DICT = {
 		langChangedUz: '✅ Til o‘zbekchaga o‘zgartirildi.',
 		langChangedRu: '✅ Til rus tiliga o‘zgartirildi.',
 		aboutText:
-			'🏢 *Biz haqimizda*\n\nBiz ta’lim markazi va ishga qabul jarayonlarini Telegram bot orqali qulay boshqarish uchun ishlaymiz. Bu bot orqali kurslar bilan tanishish, vakansiyalarga ariza topshirish va ariza holatini kuzatish mumkin.',
+			'🏛 *Biz haqimizda*\n\n*Milliy Ta’lim LC* — bilim, rivojlanish va yangi imkoniyatlar sari ishonchli qadam.\n\nBotimiz orqali kurslar haqida batafsil ma’lumot olishingiz, o‘zingizga mos yo‘nalishni tanlashingiz, vakansiyalarga ariza topshirishingiz va ariza jarayonini qulay tarzda kuzatishingiz mumkin.\n\n✨ Zamonaviy yondashuv, qulay xizmat va yuqori sifat — bizning asosiy qadriyatlarimiz.',
 		contactTitle: '📞 *Bog‘lanish*',
 		contactTelegram: 'Telegram',
 		contactPhone: 'Telefon',
@@ -76,7 +76,7 @@ const DICT = {
 		langChangedUz: '✅ Язык переключен на узбекский.',
 		langChangedRu: '✅ Язык переключен на русский.',
 		aboutText:
-			'🏢 *О нас*\n\nМы используем Telegram-бота для удобного управления курсами и приёмом заявок на вакансии. Через бота можно смотреть курсы, откликаться на вакансии и отслеживать статус заявки.',
+			'🏛 *О нас*\n\n*Milliy Ta’lim LC* — это надёжный шаг к знаниям, развитию и новым возможностям.\n\nС помощью нашего бота вы можете получить подробную информацию о курсах, выбрать подходящее направление, подать заявку на вакансии и удобно отслеживать процесс рассмотрения вашей заявки.\n\n✨ Современный подход, удобный сервис и высокое качество — наши главные ценности.',
 		contactTitle: '📞 *Контакты*',
 		contactTelegram: 'Telegram',
 		contactPhone: 'Телефон',
