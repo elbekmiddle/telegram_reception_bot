@@ -61,10 +61,18 @@ export async function manageCourseEnrollmentsBrowser(
 
     kb.text(t(ctx, '⬅️ Orqaga', '⬅️ Назад'), 'ENRV|BACK')
 
-    await replaceBotMessage(ctx, text, { parse_mode: 'Markdown', reply_markup: kb })
+    const promptMsg = await replaceBotMessage(ctx, text, { parse_mode: 'Markdown', reply_markup: kb })
     const upd = await conversation.wait()
     const data = upd.callbackQuery?.data
     if (!data) continue
+    const fromMessageId = upd.callbackQuery?.message?.message_id
+    if (fromMessageId && fromMessageId !== promptMsg.message_id) {
+      await upd.answerCallbackQuery({
+        text: t(ctx, 'Bu tugmalar eskirgan.', 'Эти кнопки устарели.'),
+        show_alert: false
+      }).catch(() => {})
+      continue
+    }
     await upd.answerCallbackQuery().catch(() => {})
 
     if (data === 'ENRV|BACK') return
@@ -100,11 +108,19 @@ async function manageEnrollmentsForCourse(
     }
 
     kb.text(t(ctx, '⬅️ Orqaga', '⬅️ Назад'), 'ENR|BACK')
-    await replaceBotMessage(ctx, text, { parse_mode: 'Markdown', reply_markup: kb })
+    const promptMsg = await replaceBotMessage(ctx, text, { parse_mode: 'Markdown', reply_markup: kb })
 
     const upd = await conversation.wait()
     const data = upd.callbackQuery?.data
     if (!data) continue
+    const fromMessageId = upd.callbackQuery?.message?.message_id
+    if (fromMessageId && fromMessageId !== promptMsg.message_id) {
+      await upd.answerCallbackQuery({
+        text: t(ctx, 'Bu tugmalar eskirgan.', 'Эти кнопки устарели.'),
+        show_alert: false
+      }).catch(() => {})
+      continue
+    }
     await upd.answerCallbackQuery().catch(() => {})
 
     if (data === 'ENR|BACK') return
@@ -128,21 +144,29 @@ async function manageEnrollmentsForCourse(
       `🗓 *Sana:* ${enrollment.createdAt.toLocaleString('ru-RU')}`
     ].join('\n')
 
+    const canReview = enrollment.status !== 'APPROVED' && enrollment.status !== 'REJECTED'
     const detailKb = new InlineKeyboard()
-    if (enrollment.status !== 'APPROVED') {
+    if (canReview) {
       detailKb.text(t(ctx, '✅ Qabul qilish', '✅ Принять'), `CE|APPROVE|${enrollment.id}`)
     }
-    if (enrollment.status !== 'REJECTED') {
-      if (enrollment.status !== 'APPROVED') detailKb.text(t(ctx, '❌ Rad etish', '❌ Отклонить'), `CE|REJECT|${enrollment.id}`)
-      else detailKb.row().text(t(ctx, '❌ Rad etish', '❌ Отклонить'), `CE|REJECT|${enrollment.id}`)
+    if (canReview) {
+      detailKb.text(t(ctx, '❌ Rad etish', '❌ Отклонить'), `CE|REJECT|${enrollment.id}`)
     }
     detailKb.row().text(t(ctx, '⬅️ Orqaga', '⬅️ Назад'), 'ENRD|BACK')
 
-    await replaceBotMessage(ctx, detail, { parse_mode: 'Markdown', reply_markup: detailKb })
+    const promptMsg = await replaceBotMessage(ctx, detail, { parse_mode: 'Markdown', reply_markup: detailKb })
     while (true) {
       const upd2 = await conversation.wait()
       const data2 = upd2.callbackQuery?.data
       if (!data2) continue
+      const fromMessageId = upd2.callbackQuery?.message?.message_id
+      if (fromMessageId && fromMessageId !== promptMsg.message_id) {
+        await upd2.answerCallbackQuery({
+          text: t(ctx, 'Bu tugmalar eskirgan.', 'Эти кнопки устарели.'),
+          show_alert: false
+        }).catch(() => {})
+        continue
+      }
       await upd2.answerCallbackQuery().catch(() => {})
       if (data2 === 'ENRD|BACK') break
       if (data2.startsWith('CE|')) return
