@@ -89,8 +89,26 @@ bot.on('callback_query:data', async (ctx, next) => {
 		.catch(() => {})
 })
 
-bot.catch(err => {
+bot.catch(async err => {
 	logger.error({ err }, 'Unhandled bot error')
+
+	try {
+		const ctx = err.ctx
+		if (ctx?.callbackQuery) {
+			await ctx
+				.answerCallbackQuery({
+					text: 'Xatolik shu bo‘limda yuz berdi. Bot ishlashda davom etadi.',
+					show_alert: false
+				})
+				.catch(() => {})
+		}
+
+		if (ctx?.chat?.id) {
+			await ctx.reply('❌ Shu bo‘limda xatolik yuz berdi. Qolgan bot ishlashda davom etadi.').catch(() => {})
+		}
+	} catch {
+		// ignore secondary error reporting failures
+	}
 })
 
 // Health check server
