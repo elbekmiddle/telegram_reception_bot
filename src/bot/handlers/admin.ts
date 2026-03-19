@@ -30,6 +30,26 @@ function enrollmentStatusPretty(ctx: BotContext, status: string): string {
 	return atext(ctx, 'Kutilmoqda', 'Ожидает')
 }
 
+function enrollmentDetailText(
+	ctx: BotContext,
+	enrollment: {
+		course: { title: string } | null
+		fullName: string
+		phone: string
+		createdAt: Date
+		user: { firstName?: string | null; lastName?: string | null; username?: string | null } | null
+		status: string
+	}
+): string {
+	return [
+		`📝 ${enrollment.course?.title || '—'}`,
+		`${atext(ctx, '👤 F.I.Sh', '👤 Ф.И.О')}: ${enrollment.fullName || userDisplayName(enrollment.user)}`,
+		`📞 ${atext(ctx, 'Telefon', 'Телефон')}: ${enrollment.phone || '—'}`,
+		`📍 ${atext(ctx, 'Holat', 'Статус')}: ${enrollmentStatusPretty(ctx, enrollment.status)}`,
+		`🗓 ${atext(ctx, 'Sana', 'Дата')}: ${enrollment.createdAt.toLocaleString('ru-RU')}`
+	].join('\n')
+}
+
 function scheduleKeyboard(applicationId: string) {
 	return new InlineKeyboard()
 		.text('📅 Bugun', `SCHEDULE|${applicationId}|TODAY`)
@@ -90,19 +110,29 @@ export function setupAdminHandlers(bot: Bot<BotContext>): void {
 		try {
 			await ctx.answerCallbackQuery()
 			const enrollmentId = ctx.callbackQuery.data.split('|')[2]
+			const current = await prisma.courseEnrollment.findUnique({
+				where: { id: enrollmentId },
+				include: { user: true, course: true }
+			})
+			if (!current) {
+				await ctx.reply(atext(ctx, 'Kurs yoziluvi topilmadi.', 'Запись на курс не найдена.'))
+				return
+			}
+			if (current.status === 'APPROVED') {
+				await ctx.answerCallbackQuery({
+					text: atext(ctx, 'Bu yoziluv allaqachon qabul qilingan.', 'Эта запись уже принята.'),
+					show_alert: false
+				}).catch(() => {})
+				await ctx.editMessageText(enrollmentDetailText(ctx, current)).catch(() => {})
+				return
+			}
 			const enrollment = await prisma.courseEnrollment.update({
 				where: { id: enrollmentId },
 				data: { status: 'APPROVED' },
 				include: { user: true, course: true }
 			})
 
-			await ctx.editMessageText([
-				`📝 ${enrollment.course.title}`,
-				`${atext(ctx, '👤 F.I.Sh', '👤 Ф.И.О')}: ${enrollment.fullName || userDisplayName(enrollment.user)}`,
-				`📞 ${atext(ctx, 'Telefon', 'Телефон')}: ${enrollment.phone || '—'}`,
-				`📍 ${atext(ctx, 'Holat', 'Статус')}: ${enrollmentStatusPretty(ctx, 'APPROVED')}`,
-				`🗓 ${atext(ctx, 'Sana', 'Дата')}: ${enrollment.createdAt.toLocaleString('ru-RU')}`
-			].join('\n'))
+			await ctx.editMessageText(enrollmentDetailText(ctx, enrollment))
 			await ctx.api.sendMessage(
 				Number(enrollment.user.telegramId),
 				atext(ctx, `✅ *Kursga yozilish qabul qilindi!*\n\nKurs: *${enrollment.course.title}*`, `✅ *Ваша запись на курс принята!*\n\nКурс: *${enrollment.course.title}*`),
@@ -119,19 +149,29 @@ export function setupAdminHandlers(bot: Bot<BotContext>): void {
 		try {
 			await ctx.answerCallbackQuery()
 			const enrollmentId = ctx.callbackQuery.data.split('|')[2]
+			const current = await prisma.courseEnrollment.findUnique({
+				where: { id: enrollmentId },
+				include: { user: true, course: true }
+			})
+			if (!current) {
+				await ctx.reply(atext(ctx, 'Kurs yoziluvi topilmadi.', 'Запись на курс не найдена.'))
+				return
+			}
+			if (current.status === 'REJECTED') {
+				await ctx.answerCallbackQuery({
+					text: atext(ctx, 'Bu yoziluv allaqachon rad etilgan.', 'Эта запись уже отклонена.'),
+					show_alert: false
+				}).catch(() => {})
+				await ctx.editMessageText(enrollmentDetailText(ctx, current)).catch(() => {})
+				return
+			}
 			const enrollment = await prisma.courseEnrollment.update({
 				where: { id: enrollmentId },
 				data: { status: 'REJECTED' },
 				include: { user: true, course: true }
 			})
 
-			await ctx.editMessageText([
-				`📝 ${enrollment.course.title}`,
-				`${atext(ctx, '👤 F.I.Sh', '👤 Ф.И.О')}: ${enrollment.fullName || userDisplayName(enrollment.user)}`,
-				`📞 ${atext(ctx, 'Telefon', 'Телефон')}: ${enrollment.phone || '—'}`,
-				`📍 ${atext(ctx, 'Holat', 'Статус')}: ${enrollmentStatusPretty(ctx, 'REJECTED')}`,
-				`🗓 ${atext(ctx, 'Sana', 'Дата')}: ${enrollment.createdAt.toLocaleString('ru-RU')}`
-			].join('\n'))
+			await ctx.editMessageText(enrollmentDetailText(ctx, enrollment))
 			await ctx.api.sendMessage(
 				Number(enrollment.user.telegramId),
 				atext(ctx, `❌ *Kursga yozilish rad etildi.*\n\nKurs: *${enrollment.course.title}*`, `❌ *Ваша запись на курс отклонена.*\n\nКурс: *${enrollment.course.title}*`),
