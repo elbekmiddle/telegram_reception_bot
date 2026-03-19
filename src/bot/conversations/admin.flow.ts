@@ -36,164 +36,6 @@ function isAdmin(ctx: BotContext): boolean {
   return Boolean(id && (id === admin1 || id === admin2))
 }
 
-// async function uploadCoursePhoto(
-//   conversation: Conversation<BotContext>,
-//   ctx: BotContext,
-//   courseId: string,
-//   isEdit: boolean = false
-// ): Promise<string | null> {
-//   let lastMessageId: number | null = null
-//   let loadingMessageId: number | null = null
-
-//   const kb = new InlineKeyboard()
-//     .text("📋 Qoidani ko'rsat", CallbackData.COURSE_PHOTO_RULES)
-//     .row()
-//     .text('⏭ Oʻtkazib yuborish', CallbackData.COURSE_PHOTO_SKIP)
-//     .text('❌ Bekor qilish', CallbackData.NAV_CANCEL)
-
-//   const title = isEdit ? 'Kurs rasmini yangilang' : 'Kurs uchun rasm yuklang'
-//   const description = isEdit 
-//     ? 'Yangi rasm yuklamoqchi boʻlsangiz yuboring, aks holda "Oʻtkazib yuborish" tugmasini bosing:'
-//     : 'Rasm yuklamoqchi boʻlsangiz yuboring, aks holda "Oʻtkazib yuborish" tugmasini bosing:'
-
-//   const sentMsg = await ctx.reply(
-//     [
-//       `📸 *${title}*`,
-//       '',
-//       '✅ *Talablar (ixtiyoriy):*',
-//       '• Rasm kurs dizayni uchun ishlatiladi',
-//       '• JPG yoki PNG format',
-//       '• Rasm kurs haqida maʼlumot berishi mumkin',
-//       '',
-//       description
-//     ].join('\n'),
-//     { parse_mode: 'Markdown', reply_markup: kb }
-//   )
-//   lastMessageId = sentMsg.message_id
-
-//   while (true) {
-//     const u = await conversation.wait()
-
-//     if (u.callbackQuery) {
-//       const data = u.callbackQuery.data
-//       if (!data) continue
-
-//       await u.answerCallbackQuery().catch(() => {})
-
-//       if (data === CallbackData.NAV_CANCEL) throw navError('CANCEL')
-//       if (data === CallbackData.COURSE_PHOTO_SKIP) {
-//         if (isEdit) {
-//           await ctx.reply('⏭ Kurs rasmi oʻzgartirilmadi')
-//         } else {
-//           await ctx.reply('⏭ Kurs rasmi yuklanmadi (ixtiyoriy)')
-//         }
-//         return null
-//       }
-
-//       if (data === CallbackData.COURSE_PHOTO_RULES) {
-//         if (lastMessageId) {
-//           try {
-//             await ctx.api.deleteMessage(ctx.chat!.id, lastMessageId)
-//           } catch (error) {
-//             // ignore
-//           }
-//         }
-
-//         const rulesMsg = await ctx.reply(
-//           [
-//             '📋 *Rasm talablari:*',
-//             '',
-//             '✅ *Qabul qilinadi:*',
-//             '• JPG, PNG formatlari',
-//             '• Har qanday oʻlcham',
-//             '• Kursga mos rasm',
-//             '',
-//             '❌ *Qabul qilinmaydi:*',
-//             '• Video fayllar',
-//             '• Hajmi juda kichik',
-//             '',
-//             description
-//           ].join('\n'),
-//           { parse_mode: 'Markdown', reply_markup: kb }
-//         )
-//         lastMessageId = rulesMsg.message_id
-//         continue
-//       }
-//     }
-
-//     if (u.message?.photo?.length) {
-//       const best = u.message.photo[u.message.photo.length - 1]
-
-//       const loadingMsg = await ctx.reply('⏳ Rasm yuklanmoqda, biroz kuting...')
-//       loadingMessageId = loadingMsg.message_id
-
-//       try {
-//         const validated = await photoService.validateTelegramPhoto(ctx, best.file_id, {
-//           minWidth: 100,
-//           minHeight: 100,
-//           minRatio: 0.1,
-//           maxRatio: 10
-//         })
-
-//         if (!validated.ok) {
-//           if (loadingMessageId) {
-//             try {
-//               await ctx.api.deleteMessage(ctx.chat!.id, loadingMessageId)
-//             } catch (error) {
-//               // ignore
-//             }
-//           }
-
-//           await ctx.reply(`❌ *Xatolik:*\n${validated.reason}`, {
-//             parse_mode: 'Markdown'
-//           })
-//           continue
-//         }
-
-//         const uploaded = await photoService.uploadBufferToCloudinary(validated.buffer)
-
-//         if (loadingMessageId) {
-//           try {
-//             await ctx.api.deleteMessage(ctx.chat!.id, loadingMessageId)
-//           } catch (error) {
-//             // ignore
-//           }
-//         }
-
-//         console.log(`✅ Kurs rasmi yuklandi: ${uploaded.secureUrl}`)
-
-//         await ctx.reply(isEdit ? '✅ Kurs rasmi yangilandi!' : '✅ Kurs rasmi muvaffaqiyatli yuklandi!')
-//         return uploaded.secureUrl
-
-//       } catch (error) {
-//         logger.error({ error }, 'Failed to upload course photo')
-        
-//         if (loadingMessageId) {
-//           try {
-//             await ctx.api.deleteMessage(ctx.chat!.id, loadingMessageId)
-//           } catch (error) {
-//             // ignore
-//           }
-//         }
-        
-//         await ctx.reply('❌ Rasmni yuklashda xatolik. Qayta urinib koʻring.')
-//         continue
-//       }
-//     }
-
-//     if (u.message?.text) {
-//       await ctx.reply('Iltimos, rasm yuboring yoki tugmalardan foydalaning.')
-//       continue
-//     }
-//   }
-// }
-
-// admin.flow.ts dagi uploadCoursePhoto funksiyasida
-
-// admin.flow.ts dagi uploadCoursePhoto funksiyasiga eski callbacklarni tozalash qo'shing
-
-// admin.flow.ts dagi uploadCoursePhoto funksiyasi - OPTIMALLASHTIRILGAN
-
 async function uploadCoursePhoto(
   conversation: Conversation<BotContext>,
   ctx: BotContext,
@@ -202,9 +44,7 @@ async function uploadCoursePhoto(
 ): Promise<string | null> {
   let lastMessageId: number | null = null
   let loadingMessageId: number | null = null
-  let isProcessing = false // Rasm yuklanayotganligini tekshirish uchun
-
-  // Bu yerda conversation.wait() bilan callback tozalash qilinmaydi. Aks holda yangi rasm update'i yo'qolib qolishi mumkin.
+  let isProcessing = false
 
   const kb = new InlineKeyboard()
     .text("📋 Qoidani ko'rsat", CallbackData.COURSE_PHOTO_RULES)
@@ -217,13 +57,10 @@ async function uploadCoursePhoto(
     ? 'Yangi rasm yuklamoqchi boʻlsangiz yuboring, aks holda "Oʻtkazib yuborish" tugmasini bosing:'
     : 'Rasm yuklamoqchi boʻlsangiz yuboring, aks holda "Oʻtkazib yuborish" tugmasini bosing:'
 
-  // Eski xabarni o'chirish
   if (lastMessageId) {
     try {
       await ctx.api.deleteMessage(ctx.chat!.id, lastMessageId)
-    } catch (error) {
-      // ignore
-    }
+    } catch (error) {}
   }
 
   const sentMsg = await ctx.reply(
@@ -256,9 +93,7 @@ async function uploadCoursePhoto(
         if (lastMessageId) {
           try {
             await ctx.api.deleteMessage(ctx.chat!.id, lastMessageId)
-          } catch (error) {
-            // ignore
-          }
+          } catch (error) {}
         }
         if (isEdit) {
           await ctx.reply('⏭ Kurs rasmi oʻzgartirilmadi')
@@ -272,9 +107,7 @@ async function uploadCoursePhoto(
         if (lastMessageId) {
           try {
             await ctx.api.deleteMessage(ctx.chat!.id, lastMessageId)
-          } catch (error) {
-            // ignore
-          }
+          } catch (error) {}
         }
 
         const rulesMsg = await ctx.reply(
@@ -300,7 +133,6 @@ async function uploadCoursePhoto(
     }
 
     if (u.message?.photo?.length) {
-      // Agar rasm yuklanayotgan bo'lsa, takroriy so'rovlarni bloklash
       if (isProcessing) {
         await ctx.reply('⏳ Rasm yuklanmoqda, biroz kuting...')
         continue
@@ -309,14 +141,12 @@ async function uploadCoursePhoto(
       isProcessing = true
       const best = u.message.photo[u.message.photo.length - 1]
 
-      // "Yuklanmoqda" xabarini yuborish
       const loadingMsg = await ctx.reply('⏳ Rasm yuklanmoqda, biroz kuting...')
       loadingMessageId = loadingMsg.message_id
 
       try {
-        // Rasmni validatsiya qilish (tezroq bo'lishi uchun minimal tekshirish)
         const validated = await photoService.validateTelegramPhoto(ctx, best.file_id, {
-          minWidth: 50,  // Minimal talablarni kamaytirish
+          minWidth: 50,
           minHeight: 50,
           minRatio: 0.1,
           maxRatio: 10
@@ -326,11 +156,8 @@ async function uploadCoursePhoto(
           if (loadingMessageId) {
             try {
               await ctx.api.deleteMessage(ctx.chat!.id, loadingMessageId)
-            } catch (error) {
-              // ignore
-            }
+            } catch (error) {}
           }
-
           await ctx.reply(`❌ *Xatolik:*\n${validated.reason}`, {
             parse_mode: 'Markdown'
           })
@@ -338,26 +165,22 @@ async function uploadCoursePhoto(
           continue
         }
 
-        // Cloudinary ga yuklash (timeout bilan)
         try {
           const uploaded = await Promise.race([
             photoService.uploadBufferToCloudinary(validated.buffer),
             new Promise((_, reject) => 
-              setTimeout(() => reject(new Error('Upload timeout')), 30000) // 30 sekund
+              setTimeout(() => reject(new Error('Upload timeout')), 30000)
             )
           ]) as { secureUrl: string }
 
           if (loadingMessageId) {
             try {
               await ctx.api.deleteMessage(ctx.chat!.id, loadingMessageId)
-            } catch (error) {
-              // ignore
-            }
+            } catch (error) {}
           }
 
           console.log(`✅ Kurs rasmi yuklandi: ${uploaded.secureUrl}`)
 
-          // ========== MUHIM: Rasmni DATABASE'ga saqlash ==========
           await conversation.external(() =>
             prisma.course.update({
               where: { id: courseId },
@@ -365,15 +188,11 @@ async function uploadCoursePhoto(
             })
           )
           console.log(`✅ Kurs rasmi database'ga saqlandi: ${courseId}`)
-          // ======================================================
 
-          // Eski xabarni o'chirish
           if (lastMessageId) {
             try {
               await ctx.api.deleteMessage(ctx.chat!.id, lastMessageId)
-            } catch (error) {
-              // ignore
-            }
+            } catch (error) {}
           }
 
           await ctx.reply(isEdit ? '✅ Kurs rasmi yangilandi!' : '✅ Kurs rasmi muvaffaqiyatli yuklandi!')
@@ -385,9 +204,7 @@ async function uploadCoursePhoto(
           if (loadingMessageId) {
             try {
               await ctx.api.deleteMessage(ctx.chat!.id, loadingMessageId)
-            } catch (error) {
-              // ignore
-            }
+            } catch (error) {}
           }
           
           await ctx.reply('❌ Rasmni yuklashda xatolik. Qayta urinib koʻring.')
@@ -401,9 +218,7 @@ async function uploadCoursePhoto(
         if (loadingMessageId) {
           try {
             await ctx.api.deleteMessage(ctx.chat!.id, loadingMessageId)
-          } catch (error) {
-            // ignore
-          }
+          } catch (error) {}
         }
         
         await ctx.reply('❌ Rasmni tekshirishda xatolik. Qayta urinib koʻring.')
@@ -412,11 +227,9 @@ async function uploadCoursePhoto(
       }
     }
 
-    // Matn xabar - FAQAT rasm kutilayotganda
     if (u.message?.text && !isProcessing) {
       const text = u.message.text.trim().toLowerCase()
       
-      // Skip buyruqlarini tekshirish
       if (text === '/start') throw navError('START')
       if (text === '/admin') throw navError('ADMIN')
       if (text === '/cancel') throw navError('CANCEL')
@@ -425,9 +238,7 @@ async function uploadCoursePhoto(
     }
   }
 }
-/**
- * Kurs rasmini o'chirish
- */
+
 async function deleteCoursePhoto(
   conversation: Conversation<BotContext>,
   ctx: BotContext,
@@ -455,6 +266,7 @@ async function deleteCoursePhoto(
   }
   return false
 }
+
 async function uploadVacancyPhoto(
 	conversation: Conversation<BotContext>,
 	ctx: BotContext,
@@ -516,7 +328,6 @@ async function uploadVacancyPhoto(
 		console.log('⏳ Rasm kutilyapti...')
 		const upd = await conversation.wait()
 
-		// ================= CALLBACK =================
 		if (upd.callbackQuery) {
 			const data = upd.callbackQuery.data
 			await upd.answerCallbackQuery().catch(() => {})
@@ -548,12 +359,10 @@ async function uploadVacancyPhoto(
 				continue
 			}
 
-			// Boshqa (eskirgan) callbacklar
 			console.log('⚠️ Boshqa turdagi callback olindi:', data)
 			continue
 		}
 
-		// ================= PHOTO =================
 		if (upd.message?.photo?.length) {
 			if (isProcessing) {
 				await ctx.reply('⏳ Rasm yuklanmoqda, biroz kuting...')
@@ -594,7 +403,6 @@ async function uploadVacancyPhoto(
 					await ctx.api.deleteMessage(ctx.chat!.id, loadingMessageId!)
 				} catch {}
 
-				// Database ga saqlash
 				await prisma.vacancy.update({
 					where: { id: vacancyId },
 					data: { imageUrl: uploaded.secureUrl }
@@ -616,7 +424,6 @@ async function uploadVacancyPhoto(
 			continue
 		}
 
-		// ================= TEXT =================
 		if (upd.message?.text && !isProcessing) {
 			const text = upd.message.text.trim()
 			if (text === '/start') throw navError('START')
@@ -629,13 +436,11 @@ async function uploadVacancyPhoto(
 	return result
 }
 
-// addVacancyQuestion funksiyasining to'liq versiyasi
 async function addVacancyQuestion(
 	conversation: Conversation<BotContext>,
 	ctx: BotContext,
 	vacancyId: string
 ): Promise<void> {
-	// Avval mavjud savollar sonini tekshirish
 	const existingQuestions = await prisma.vacancyQuestion.count({
 		where: { vacancyId }
 	})
@@ -645,11 +450,9 @@ async function addVacancyQuestion(
 		return
 	}
 
-	// Savol matni
 	const question = await askText(conversation, ctx, '❓ *Savol matnini kiriting:*')
 	if (!question) return
 
-	// Savol turi
 	const type = await askChoice(conversation, ctx, '🧩 *Savol turini tanlang:*', [
 		{ text: '✍️ Oddiy matn', data: 'TEXT' },
 		{ text: '🔘 Variantli (SELECT)', data: 'SELECT' }
@@ -684,14 +487,12 @@ async function addVacancyQuestion(
 			})
 			optIndex++
 
-			// Agar maksimum variantga yetgan bo'lsak, to'xtatamiz
 			if (optIndex >= maxOptions) {
 				await ctx.reply(`✅ Maksimum ${maxOptions} ta variant qoʻshildi.`)
 				addMore = false
 				break
 			}
 
-			// Yana variant qo'shishni so'rash
 			const more = await askChoice(
 				conversation,
 				ctx,
@@ -704,18 +505,15 @@ async function addVacancyQuestion(
 			addMore = more !== null && more.trim() === 'YES'
 		}
 
-		// Agar variant qo'shilmagan bo'lsa, xatolik
 		if (options.length === 0) {
 			await ctx.reply('❌ Variantli savol uchun kamida 1 ta variant qoʻshish kerak!')
 			return
 		}
 	}
 
-	// Tartib raqami
 	const orderStr = await askText(conversation, ctx, '🔢 *Tartib raqami (0 dan boshlanadi):*')
 	const order = Number(orderStr?.replace(/\D+/g, '')) || 0
 
-	// Savolni yaratish
 	const created = await prisma.vacancyQuestion.create({
 		data: {
 			vacancyId,
@@ -725,7 +523,6 @@ async function addVacancyQuestion(
 		}
 	})
 
-	// Variantlarni qo'shish
 	if (options.length > 0) {
 		for (let i = 0; i < options.length; i++) {
 			await prisma.questionOption.create({
@@ -770,7 +567,6 @@ async function deleteVacancyPhoto(
   }
   return false
 }
-// ==================== VACANCY MANAGEMENT ====================
 
 async function manageVacancies(
   conversation: Conversation<BotContext>,
@@ -795,7 +591,6 @@ async function manageVacancies(
       take: perPage
     })
 
-    // Takroriy nomlarni aniqlash
     const titleCounts = new Map<string, number>()
     items.forEach(v => {
       titleCounts.set(v.title, (titleCounts.get(v.title) || 0) + 1)
@@ -805,14 +600,6 @@ async function manageVacancies(
     const kb = new InlineKeyboard()
 
     for (const v of items) {
-      const salaryIcon = v.salary ? '💰' : '⚪️'
-      const repeatIcon = titleCounts.get(v.title)! > 1 ? '🔄' : ''
-
-      // text += `${v.isActive ? '✅' : '⛔️'} *${v.title}* ${repeatIcon}\n`
-      // text += `   ${salaryIcon} ${v.salary || 'Maosh kiritilmagan'}\n`
-      // text += `   🆔 ${v.id.slice(0, 8)}\n`
-      // text += `   📅 ${new Date(v.createdAt).toLocaleDateString()}\n\n`
-
       kb.text(`${v.title}`, `VAC|VIEW|${v.id}`).row()
     }
 
@@ -845,105 +632,6 @@ async function manageVacancies(
     }
   }
 }
-
-// async function viewVacancy(
-//   conversation: Conversation<BotContext>,
-//   ctx: BotContext,
-//   vacancyId: string
-// ): Promise<void> {
-//   const vacancy = await prisma.vacancy.findUnique({
-//     where: { id: vacancyId },
-//     include: { questions: { include: { options: true } } }
-//   })
-
-//   if (!vacancy) return
-
-//   const hasSalary = vacancy.salary !== null && vacancy.salary !== ''
-
-//   const text = [
-//     `📌 *${vacancy.title}*`,
-//     hasSalary ? `💰 *Maosh:* ${vacancy.salary}` : `💰 *Maosh:* Kiritilmagan`,
-//     `⚡️ *Holat:* ${vacancy.isActive ? 'Faol' : 'Faol emas'}`,
-//     `❓ *Savollar:* ${vacancy.questions?.length || 0} ta`,
-//     '',
-//     '*Quyidagilardan birini tanlang:*'
-//   ].join('\n')
-
-//   const kb = new InlineKeyboard().text('✏️ Nomi', `VAC_EDIT|TITLE|${vacancy.id}`)
-
-//   if (hasSalary) {
-//     kb.text('💰 Maoshni tahrirlash', `VAC_EDIT|SALARY|${vacancy.id}`)
-//   } else {
-//     kb.text('💰 Maosh qoʻshish', `VAC_EDIT|ADD_SALARY|${vacancy.id}`)
-//   }
-
-//   kb.row()
-//     .text('🔀 Faollik', `VAC_EDIT|TOGGLE|${vacancy.id}`)
-//     .text('❓ Savollar', `VAC_QUESTIONS|${vacancy.id}`)
-//     .row()
-//     .text('📋 Arizalar', `VAC_APPLICATIONS|${vacancy.id}`)
-//     .text('🗑 O‘chirish', `VAC_DELETE|${vacancy.id}`)
-//     .row()
-//     .text('⬅️ Orqaga', 'VAC_BACK')
-
-//   await replaceBotMessage(ctx, text, { parse_mode: 'Markdown', reply_markup: kb })
-
-//   const upd = await conversation.wait()
-//   const data = upd.callbackQuery?.data
-//   if (!data) return
-//   await upd.answerCallbackQuery().catch(() => {})
-
-//   if (data === 'VAC_BACK') return
-
-//   if (data.startsWith('VAC_EDIT|TITLE|')) {
-//     const newTitle = await askText(conversation, ctx, `✏️ *Yangi nom* (hozirgi: ${vacancy.title}):`)
-//     if (newTitle) {
-//       await prisma.vacancy.update({ where: { id: vacancyId }, data: { title: newTitle } })
-//       await ctx.reply('✅ Nomi yangilandi!')
-//     }
-//     await viewVacancy(conversation, ctx, vacancyId)
-//     return
-//   }
-
-//   if (data.startsWith('VAC_EDIT|SALARY|') || data.startsWith('VAC_EDIT|ADD_SALARY|')) {
-//     await editVacancySalary(conversation, ctx, vacancyId, data.startsWith('VAC_EDIT|SALARY|'))
-//     await viewVacancy(conversation, ctx, vacancyId)
-//     return
-//   }
-
-//   if (data.startsWith('VAC_EDIT|TOGGLE|')) {
-//     await prisma.vacancy.update({
-//       where: { id: vacancyId },
-//       data: { isActive: !vacancy.isActive }
-//     })
-//     await ctx.reply(`✅ Vakansiya ${!vacancy.isActive ? 'faollashtirildi' : 'faolsizlashtirildi'}`)
-//     await viewVacancy(conversation, ctx, vacancyId)
-//     return
-//   }
-
-//   if (data.startsWith('VAC_QUESTIONS|')) {
-//     await manageVacancyQuestions(conversation, ctx, vacancyId)
-//     return
-//   }
-
-//   if (data.startsWith('VAC_APPLICATIONS|')) {
-//     await viewVacancyApplications(conversation, ctx, vacancyId)
-//     return
-//   }
-
-//   if (data.startsWith('VAC_DELETE|')) {
-//     const confirm = await askChoice(conversation, ctx, '⚠️ *Rostdan ham o‘chirilsinmi?*', [
-//       { text: '✅ Ha', data: 'YES' },
-//       { text: '❌ Yo‘q', data: 'NO' }
-//     ])
-//     if (confirm === 'YES') {
-//       await prisma.vacancy.delete({ where: { id: vacancyId } })
-//       await ctx.reply('✅ Vakansiya o‘chirildi')
-//     }
-//     return
-//   }
-// }
-
 
 async function viewVacancy(
 	conversation: Conversation<BotContext>,
@@ -979,7 +667,6 @@ async function viewVacancy(
 	}
 	kb.row()
 
-	// YANGI: Rasm tugmalari
 	if (hasImage) {
 		kb.text('🖼 Rasmni yangilash', `VAC_EDIT|PHOTO|${vacancy.id}`)
 		kb.text('🗑 Rasmni oʻchirish', `VAC_EDIT|DELETE_PHOTO|${vacancy.id}`)
@@ -988,12 +675,11 @@ async function viewVacancy(
 	}
 	kb.row()
 
-	// kb.text('🔀 Faollik', `VAC_EDIT|TOGGLE|${vacancy.id}`)
-		.text('❓ Savollar', `VAC_QUESTIONS|${vacancy.id}`)
-		.row()
-		.text('🗑 O‘chirish', `VAC_DELETE|${vacancy.id}`)
-		.row()
-		.text('⬅️ Orqaga', 'VAC_BACK')
+	kb.text('❓ Savollar', `VAC_QUESTIONS|${vacancy.id}`)
+	kb.row()
+	.text('🗑 O‘chirish', `VAC_DELETE|${vacancy.id}`)
+	.row()
+	.text('⬅️ Orqaga', 'VAC_BACK')
 
 	await replaceBotMessage(ctx, text, { parse_mode: 'Markdown', reply_markup: kb })
 
@@ -1024,7 +710,6 @@ async function viewVacancy(
 		return
 	}
 
-	// YANGI: Rasmni yangilash
 	if (data.startsWith('VAC_EDIT|PHOTO|') || data.startsWith('VAC_EDIT|ADD_PHOTO|')) {
 		const isEdit = data.startsWith('VAC_EDIT|PHOTO|')
 		await uploadVacancyPhoto(conversation, ctx, vacancyId, isEdit)
@@ -1032,7 +717,6 @@ async function viewVacancy(
 		return
 	}
 
-	// YANGI: Rasmni o‘chirish
 	if (data.startsWith('VAC_EDIT|DELETE_PHOTO|')) {
 		await deleteVacancyPhoto(conversation, ctx, vacancyId)
 		await viewVacancy(conversation, ctx, vacancyId)
@@ -1071,6 +755,7 @@ async function viewVacancy(
 		return
 	}
 }
+
 async function viewVacancyApplications(
   conversation: Conversation<BotContext>,
   ctx: BotContext,
@@ -1169,7 +854,7 @@ async function manageVacancyQuestions(
   while (true) {
     const questions = await prisma.vacancyQuestion.findMany({
       where: { vacancyId },
-      include: { options: true } as any,
+      include: { options: true },
       orderBy: { order: 'asc' }
     })
 
@@ -1179,7 +864,7 @@ async function manageVacancyQuestions(
     if (questions.length === 0) {
       text += 'Hozircha savollar yo‘q.'
     } else {
-      ;(questions as any[]).forEach((q: any, idx) => {
+      questions.forEach((q, idx) => {
         text += `${idx + 1}. *${q.question}*\n`
         text += `   Tur: ${q.type}\n`
         if (q.options.length > 0) {
@@ -1251,41 +936,16 @@ async function viewVacancyQuestion(
   if (data === 'Q_VIEW_BACK') return
 
   if (data.startsWith('Q_DELETE|')) {
-    const confirm = await askChoice(conversation, ctx, '⚠️ *Savol o‘chirilsinmi?*', [
+    const confirm = await askChoice(conversation, ctx, '⚠️ *Savol oʻchirilsinmi?*', [
       { text: '✅ Ha', data: 'YES' },
-      { text: '❌ Yo‘q', data: 'NO' }
+      { text: '❌ Yoʻq', data: 'NO' }
     ])
     if (confirm === 'YES') {
       await prisma.vacancyQuestion.delete({ where: { id: question.id } })
-      await ctx.reply('✅ Savol o‘chirildi')
+      await ctx.reply('✅ Savol oʻchirildi')
     }
   }
 }
-
-// ==================== COURSE MANAGEMENT ====================
-
-// async function manageCourses(
-//   conversation: Conversation<BotContext>,
-//   ctx: BotContext
-// ): Promise<void> {
-//   const perPage = 5
-//   let page = 0
-
-//   while (true) {
-//     const total = await prisma.course.count()
-//     if (total === 0) {
-//       await ctx.reply('📭 *Kurslar yoʻq*', { parse_mode: 'Markdown' })
-//       return
-//     }
-
-//     const totalPages = Math.ceil(total / perPage)
-//     page = Math.min(page, totalPages - 1)
-
-//     const courses = await prisma.course.findMany({
-//       skip: page * perPage,
-//       take: perPage,
-//       orderBy: { createdAt: 'desc' }
-//     })
 
 async function manageCourses(
   conversation: Conversation<BotContext>,
@@ -1433,101 +1093,99 @@ async function viewCourse(
 
     const promptMsg = await replaceBotMessage(ctx, text, { parse_mode: 'Markdown', reply_markup: kb })
 
-    while (true) {
-      const upd = await conversation.wait()
-      const data = upd.callbackQuery?.data
-      if (!data) continue
+    const upd = await conversation.wait()
+    const data = upd.callbackQuery?.data
+    if (!data) continue
 
-      const fromMessageId = upd.callbackQuery?.message?.message_id
-      if (fromMessageId && fromMessageId !== promptMsg.message_id) {
-        await upd.answerCallbackQuery({
-          text: getUserLang(ctx) === 'ru' ? 'Эти кнопки устарели.' : 'Bu tugmalar eskirgan.',
-          show_alert: false
-        }).catch(() => {})
-        continue
-      }
+    const fromMessageId = upd.callbackQuery?.message?.message_id
+    if (fromMessageId && fromMessageId !== promptMsg.message_id) {
+      await upd.answerCallbackQuery({
+        text: getUserLang(ctx) === 'ru' ? 'Эти кнопки устарели.' : 'Bu tugmalar eskirgan.',
+        show_alert: false
+      }).catch(() => {})
+      continue
+    }
 
-      await upd.answerCallbackQuery().catch(() => {})
+    await upd.answerCallbackQuery().catch(() => {})
 
-      if (data === 'COURSE_BACK') return
+    if (data === 'COURSE_BACK') return
 
-      if (data.startsWith('COURSE_EDIT|TITLE|')) {
-        const newTitle = await askText(
-          conversation,
-          ctx,
-          `✏️ *Yangi nom* (hozirgi: ${escapeMarkdown(course.title)}):`
-        )
-        if (newTitle) {
-          await conversation.external(() =>
-            prisma.course.update({ where: { id: courseId }, data: { title: newTitle } })
-          )
-          await ctx.reply('✅ Nomi yangilandi!')
-        }
-        break
-      }
-
-      if (data.startsWith('COURSE_EDIT|DESC|')) {
-        const newDesc = await askText(
-          conversation,
-          ctx,
-          `📝 *Yangi tavsif* (hozirgi: ${
-            course.description ? escapeMarkdown(course.description) : 'kiritilmagan'
-          }):\n\nTavsif kiritmasangiz, boʻsh qoldirish uchun ➖ belgisini yuboring.`
-        )
-        if (newDesc) {
-          const description = newDesc === '➖' ? null : newDesc
-          await conversation.external(() =>
-            prisma.course.update({ where: { id: courseId }, data: { description } })
-          )
-          await ctx.reply(description ? '✅ Tavsif yangilandi!' : '✅ Tavsif oʻchirildi!')
-        }
-        break
-      }
-
-      if (data.startsWith('COURSE_EDIT|PRICE|') || data.startsWith('COURSE_EDIT|ADD_PRICE|')) {
-        await editCoursePrice(conversation, ctx, courseId, data.startsWith('COURSE_EDIT|PRICE|'))
-        break
-      }
-
-      if (data.startsWith('COURSE_EDIT|PHOTO|') || data.startsWith('COURSE_EDIT|ADD_PHOTO|')) {
-        const isEdit = data.startsWith('COURSE_EDIT|PHOTO|')
-        await uploadCoursePhoto(conversation, ctx, courseId, isEdit)
-        break
-      }
-
-      if (data.startsWith('COURSE_EDIT|DELETE_PHOTO|')) {
-        await deleteCoursePhoto(conversation, ctx, courseId)
-        break
-      }
-
-      if (data.startsWith('COURSE_EDIT|TOGGLE|')) {
+    if (data.startsWith('COURSE_EDIT|TITLE|')) {
+      const newTitle = await askText(
+        conversation,
+        ctx,
+        `✏️ *Yangi nom* (hozirgi: ${escapeMarkdown(course.title)}):`
+      )
+      if (newTitle) {
         await conversation.external(() =>
-          prisma.course.update({
-            where: { id: courseId },
-            data: { isActive: !course.isActive }
-          })
+          prisma.course.update({ where: { id: courseId }, data: { title: newTitle } })
         )
-        await ctx.reply(`✅ Kurs ${!course.isActive ? 'faollashtirildi' : 'faolsizlashtirildi'}`)
-        break
+        await ctx.reply('✅ Nomi yangilandi!')
       }
+      continue
+    }
 
-      if (data.startsWith('COURSE_DELETE|')) {
-        const confirm = await askChoice(conversation, ctx, '⚠️ *Rostdan ham oʻchirilsinmi?*', [
-          { text: '✅ Ha', data: 'YES' },
-          { text: '❌ Yoʻq', data: 'NO' }
-        ])
-        if (confirm === 'YES') {
-          await conversation.external(() =>
-            prisma.course.delete({ where: { id: courseId } })
-          )
-          await ctx.reply('✅ Kurs oʻchirildi')
-          return
-        }
-        break
+    if (data.startsWith('COURSE_EDIT|DESC|')) {
+      const newDesc = await askText(
+        conversation,
+        ctx,
+        `📝 *Yangi tavsif* (hozirgi: ${
+          course.description ? escapeMarkdown(course.description) : 'kiritilmagan'
+        }):\n\nTavsif kiritmasangiz, boʻsh qoldirish uchun ➖ belgisini yuboring.`
+      )
+      if (newDesc) {
+        const description = newDesc === '➖' ? null : newDesc
+        await conversation.external(() =>
+          prisma.course.update({ where: { id: courseId }, data: { description } })
+        )
+        await ctx.reply(description ? '✅ Tavsif yangilandi!' : '✅ Tavsif oʻchirildi!')
+      }
+      continue
+    }
+
+    if (data.startsWith('COURSE_EDIT|PRICE|') || data.startsWith('COURSE_EDIT|ADD_PRICE|')) {
+      await editCoursePrice(conversation, ctx, courseId, data.startsWith('COURSE_EDIT|PRICE|'))
+      continue
+    }
+
+    if (data.startsWith('COURSE_EDIT|PHOTO|') || data.startsWith('COURSE_EDIT|ADD_PHOTO|')) {
+      const isEdit = data.startsWith('COURSE_EDIT|PHOTO|')
+      await uploadCoursePhoto(conversation, ctx, courseId, isEdit)
+      continue
+    }
+
+    if (data.startsWith('COURSE_EDIT|DELETE_PHOTO|')) {
+      await deleteCoursePhoto(conversation, ctx, courseId)
+      continue
+    }
+
+    if (data.startsWith('COURSE_EDIT|TOGGLE|')) {
+      await conversation.external(() =>
+        prisma.course.update({
+          where: { id: courseId },
+          data: { isActive: !course.isActive }
+        })
+      )
+      await ctx.reply(`✅ Kurs ${!course.isActive ? 'faollashtirildi' : 'faolsizlashtirildi'}`)
+      continue
+    }
+
+    if (data.startsWith('COURSE_DELETE|')) {
+      const confirm = await askChoice(conversation, ctx, '⚠️ *Rostdan ham oʻchirilsinmi?*', [
+        { text: '✅ Ha', data: 'YES' },
+        { text: '❌ Yoʻq', data: 'NO' }
+      ])
+      if (confirm === 'YES') {
+        await conversation.external(() =>
+          prisma.course.delete({ where: { id: courseId } })
+        )
+        await ctx.reply('✅ Kurs oʻchirildi')
+        return
       }
     }
   }
 }
+
 async function viewCourseEnrollments(
   conversation: Conversation<BotContext>,
   ctx: BotContext,
@@ -1612,10 +1270,8 @@ async function editCoursePrice(
   } else if (priceValue === 'CUSTOM') {
     const customPrice = await askText(conversation, ctx, '💰 *Narxni kiriting:*')
     const cleanPrice = customPrice.replace(/[^0-9]/g, '')
-    // MUHIM: "so'm" ni bir marta qo'shamiz
     newPrice = cleanPrice ? `${parseInt(cleanPrice).toLocaleString()} soʻm` : null
   } else {
-    // MUHIM: "so'm" ni bir marta qo'shamiz
     newPrice = `${parseInt(priceValue).toLocaleString()} soʻm`
   }
 
@@ -1648,7 +1304,7 @@ async function manageCourseQuestions(
     if (questions.length === 0) {
       text += 'Hozircha savollar yoʻq.'
     } else {
-      ;(questions as any[]).forEach((q: any, idx) => {
+      questions.forEach((q, idx) => {
         text += `${idx + 1}. *${q.question}*\n`
         text += `   Tur: ${q.type}\n`
         if (q.options.length > 0) {
@@ -1802,8 +1458,6 @@ async function addCourseQuestion(
   await ctx.reply('✅ Savol qoʻshildi!')
 }
 
-// ==================== STATISTICS WITH EXPORT ====================
-
 async function showStatistics(
   conversation: Conversation<BotContext>,
   ctx: BotContext
@@ -1890,7 +1544,6 @@ async function exportStatistics(
   await ctx.reply(adminText(ctx, '⏳ Statistika tayyorlanmoqda...', '⏳ Подготавливается статистика...'))
 
   try {
-    // Ma'lumotlarni olish
     const applications = await prisma.application.findMany({
       include: {
         answers: true,
@@ -1934,543 +1587,6 @@ async function exportStatistics(
     await ctx.reply(adminText(ctx, '❌ Statistika yuklab olishda xatolik yuz berdi.', '❌ Не удалось выгрузить статистику.'))
   }
 }
-
-// ==================== MAIN ADMIN FLOW ====================
-
-// export async function adminFlow(
-//   conversation: Conversation<BotContext>,
-//   ctx: BotContext
-// ): Promise<void> {
-//   if (!isAdmin(ctx)) {
-//     await ctx.reply('⛔️ Ruxsat yo‘q. Siz admin emassiz.')
-//     return
-//   }
-
-//   try {
-//     while (true) {
-// 			const action = await askChoice(conversation, ctx, '*👨‍💼 Admin panel*', [
-// 				{ text: '📌 Vakansiya qo‘shish', data: 'A|VAC_ADD' },
-// 				{ text: '🎓 Kurs qo‘shish', data: 'A|COURSE_ADD' },
-// 				{ text: '📋 Vakansiyalar ro‘yxati', data: 'A|VAC_LIST' },
-// 				{ text: '📚 Kurslar ro‘yxati', data: 'A|COURSE_LIST' },
-// 				{ text: '📨 Arizalar', data: 'A|APP_LIST' },
-// 				{ text: '📊 Statistika', data: 'A|STATS' }
-// 			])
-
-// 			if (!action) continue
-
-// 			if (action === 'A|STATS') {
-// 				await showStatistics(conversation, ctx)
-// 				continue
-// 			}
-
-// 			if (action === 'A|VAC_LIST') {
-// 				await manageVacancies(conversation, ctx)
-// 				continue
-// 			}
-
-// 			if (action === 'A|COURSE_LIST') {
-// 				await manageCourses(conversation, ctx)
-// 				continue
-// 			}
-
-// 			if (action === 'A|APP_LIST') {
-// 				await ctx.reply('📨 Arizalar boʻlimi ishga tushirilmoqda...')
-// 				continue
-// 			}
-
-// 			// ==================== VACANCY ADD WITH PHOTO AND CLEANUP ====================
-// 			// if (action === 'A|VAC_ADD') {
-// 			// 	// Step 1: Vakansiya nomi
-// 			// 	const title = await askText(conversation, ctx, '📌 *Step 1: Vakansiya nomini kiriting*')
-// 			// 	if (!title) continue
-
-// 			// 	// MAVJUD VAKANSIYANI TEKSHIRISH
-// 			// 	const existingVacancy = await prisma.vacancy.findFirst({
-// 			// 		where: {
-// 			// 			title: {
-// 			// 				equals: title,
-// 			// 				mode: 'insensitive'
-// 			// 			}
-// 			// 		}
-// 			// 	})
-
-// 			// 	if (existingVacancy) {
-// 			// 		const confirm = await askChoice(
-// 			// 			conversation,
-// 			// 			ctx,
-// 			// 			`⚠️ *${title}* nomli vakansiya allaqachon mavjud!\n\nDavom etilsa, takroriy vakansiya yaratiladi.\n\nDavom etasizmi?`,
-// 			// 			[
-// 			// 				{ text: '✅ Ha, davom et', data: 'CONTINUE' },
-// 			// 				{ text: '❌ Yoʻq, bekor qil', data: 'CANCEL' }
-// 			// 			]
-// 			// 		)
-
-// 			// 		if (confirm !== 'CONTINUE') {
-// 			// 			await ctx.reply('❌ Vakansiya qoʻshish bekor qilindi.')
-// 			// 			continue
-// 			// 		}
-// 			// 	}
-
-// 			// 	// Step 2: Maosh so'rash - OPTIONAL
-// 			// 	const salaryChoice = await askChoice(
-// 			// 		conversation,
-// 			// 		ctx,
-// 			// 		'💰 *Step 2: Maoshni tanlang yoki oʻtkazib yuboring*',
-// 			// 		[
-// 			// 			{ text: '1 000 000 soʻm', data: 'SALARY|1_000_000' },
-// 			// 			{ text: '2 000 000 soʻm', data: 'SALARY|2_000_000' },
-// 			// 			{ text: '4 000 000 soʻm', data: 'SALARY|4_000_000' },
-// 			// 			{ text: 'Kelishiladi', data: 'SALARY|negotiable' },
-// 			// 			{ text: '⏭ Oʻtkazib yuborish', data: 'SALARY|SKIP' }
-// 			// 		],
-// 			// 		{ columns: 2 }
-// 			// 	)
-
-// 			// 	console.log('Salary choice raw:', salaryChoice)
-
-// 			// 	let salary: string | null = null
-
-// 			// 	if (salaryChoice) {
-// 			// 		const trimmedChoice = salaryChoice.trim()
-// 			// 		if (trimmedChoice.startsWith('SALARY|')) {
-// 			// 			const salaryValue = trimmedChoice.replace('SALARY|', '')
-// 			// 			if (salaryValue === 'SKIP') {
-// 			// 				salary = null
-// 			// 			} else if (salaryValue === 'negotiable') {
-// 			// 				salary = 'Kelishiladi'
-// 			// 			} else {
-// 			// 				salary = salaryValue.replace(/_/g, ' ') + ' soʻm'
-// 			// 			}
-// 			// 		}
-// 			// 	}
-
-// 			// 	// Vakansiyani yaratish
-// 			// 	const vacancy = await prisma.vacancy.create({
-// 			// 		data: {
-// 			// 			title,
-// 			// 			salary: salary,
-// 			// 			isActive: true
-// 			// 		}
-// 			// 	})
-
-// 			// 	await ctx.reply(
-// 			// 		salary
-// 			// 			? `✅ Vakansiya yaratildi! (Maosh: ${salary})`
-// 			// 			: `✅ Vakansiya yaratildi! Maosh kiritilmadi`
-// 			// 	)
-
-// 			// 	// ========== MUHIM: ESKI CALLBACKLARNI TOZALASH ==========
-// 			// 	console.log('🧹 Eski callbacklarni tozalash...')
-
-// 			// 	// Eski callbacklarni yig'ishtirish
-// 			// 	let cleanedCount = 0
-// 			// 	const maxCleanup = 5
-
-// 			// 	while (cleanedCount < maxCleanup) {
-// 			// 		try {
-// 			// 			// 200ms kutish bilan eski callbacklarni yig'ish
-// 			// 			const oldUpd = await Promise.race([
-// 			// 				conversation.wait(),
-// 			// 				new Promise(resolve => setTimeout(resolve, 200))
-// 			// 			])
-
-// 			// 			if (oldUpd && 'callbackQuery' in oldUpd && oldUpd.callbackQuery) {
-// 			// 				await oldUpd.answerCallbackQuery().catch(() => {})
-// 			// 				console.log(
-// 			// 					`🧹 ${cleanedCount + 1}-eski callback tozalandi:`,
-// 			// 					oldUpd.callbackQuery.data
-// 			// 				)
-// 			// 				cleanedCount++
-// 			// 			} else {
-// 			// 				// Agar callback kelmasa, tozalashni to'xtat
-// 			// 				break
-// 			// 			}
-// 			// 		} catch (e) {
-// 			// 			// Timeout yoki xatolik bo'lsa, tozalashni to'xtat
-// 			// 			console.log('Eski callbacklar yoʻq yoki vaqt tugadi')
-// 			// 			break
-// 			// 		}
-// 			// 	}
-
-// 			// 	console.log(`🧹 Jami tozalangan: ${cleanedCount} ta eski callback`)
-// 			// 	await conversation.sleep(500)
-// 			// 	// ========== TOZALASH TUGADI ==========
-
-// 			// 	// ========== RASM YUKLASH (SAVOLLARDAN OLDIN) ==========
-// 			// 	console.log('📸 Vakansiya rasmi soʻralmoqda...')
-// 			// 	const photoUrl = await uploadVacancyPhoto(conversation, ctx, vacancy.id)
-// 			// 	if (photoUrl) {
-// 			// 		console.log('✅ Rasm yuklandi:', photoUrl)
-// 			// 	}
-// 			// 	// ========== RASM YUKLASH TUGADI ==========
-
-// 			// 	// Savol qo'shishni so'rash
-// 			// 	const addQuestion = await askChoice(conversation, ctx, '❓ *Savol qoʻshasizmi?*', [
-// 			// 		{ text: '✅ Ha', data: 'YES' },
-// 			// 		{ text: '⏭ Oʻtkazib yuborish', data: 'NO' }
-// 			// 	])
-
-// 			// 	console.log('Savol qoʻshish natijasi:', addQuestion)
-
-// 			// 	if (addQuestion && addQuestion.trim() === 'YES') {
-// 			// 		await ctx.reply('Endi savollar qoʻshamiz.')
-
-// 			// 		let addMore = true
-// 			// 		while (addMore) {
-// 			// 			await addVacancyQuestion(conversation, ctx, vacancy.id)
-
-// 			// 			await conversation.sleep(500) // Har bir savoldan keyin kutish
-
-// 			// 			const more = await askChoice(conversation, ctx, 'Yana savol qoʻshasizmi?', [
-// 			// 				{ text: '➕ Yana savol', data: 'YES' },
-// 			// 				{ text: '✅ Yetarli', data: 'NO' }
-// 			// 			])
-
-// 			// 			// MUHIM: TypeScript xatosini tuzatish
-// 			// 			addMore = more !== null && more.trim() === 'YES'
-// 			// 		}
-
-// 			// 		await ctx.reply('✅ Vakansiya va savollar muvaffaqiyatli qoʻshildi!')
-// 			// 	} else if (addQuestion && addQuestion.trim() === 'NO') {
-// 			// 		await ctx.reply('✅ Vakansiya muvaffaqiyatli qoʻshildi! (Savollar qoʻshilmadi)')
-// 			// 	} else {
-// 			// 		await ctx.reply('⚠️ Savol qoʻshish bekor qilindi.')
-// 			// 	}
-// 			// 	continue
-// 			// }
-
-// 			// admin.flow.ts dagi A|VAC_ADD qismida
-
-// 			if (action === 'A|VAC_ADD') {
-// 				// Step 1: Vakansiya nomi
-// 				const title = await askText(conversation, ctx, '📌 *Step 1: Vakansiya nomini kiriting*')
-// 				if (!title) continue
-
-// 				// ========== YANGI: Description qo'shish ==========
-// 				const wantDescription = await askChoice(
-// 					conversation,
-// 					ctx,
-// 					'📝 *Vakansiya tavsifi qoʻshasizmi?*',
-// 					[
-// 						{ text: '✅ Ha', data: 'YES' },
-// 						{ text: '⏭ Oʻtkazib yuborish', data: 'NO' }
-// 					]
-// 				)
-
-// 				let description: string | null = null
-// 				if (wantDescription === 'YES') {
-// 					description = await askText(
-// 						conversation,
-// 						ctx,
-// 						'📝 *Vakansiya tavsifini kiriting:*\n\n(Vakansiya haqida qoʻshimcha maʼlumot)'
-// 					)
-// 				}
-// 				// ================================================
-
-// 				// MAVJUD VAKANSIYANI TEKSHIRISH
-// 				const existingVacancy = await prisma.vacancy.findFirst({
-// 					where: {
-// 						title: {
-// 							equals: title,
-// 							mode: 'insensitive'
-// 						}
-// 					}
-// 				})
-
-// 				if (existingVacancy) {
-// 					const confirm = await askChoice(
-// 						conversation,
-// 						ctx,
-// 						`⚠️ *${title}* nomli vakansiya allaqachon mavjud!\n\nDavom etilsa, takroriy vakansiya yaratiladi.\n\nDavom etasizmi?`,
-// 						[
-// 							{ text: '✅ Ha, davom et', data: 'CONTINUE' },
-// 							{ text: '❌ Yoʻq, bekor qil', data: 'CANCEL' }
-// 						]
-// 					)
-
-// 					if (confirm !== 'CONTINUE') {
-// 						await ctx.reply('❌ Vakansiya qoʻshish bekor qilindi.')
-// 						continue
-// 					}
-// 				}
-
-// 				// Step 2: Maosh so'rash - OPTIONAL
-// 				const salaryChoice = await askChoice(
-// 					conversation,
-// 					ctx,
-// 					'💰 *Step 2: Maoshni tanlang yoki oʻtkazib yuboring*',
-// 					[
-// 						{ text: '1 000 000 soʻm', data: 'SALARY|1_000_000' },
-// 						{ text: '2 000 000 soʻm', data: 'SALARY|2_000_000' },
-// 						{ text: '4 000 000 soʻm', data: 'SALARY|4_000_000' },
-// 						{ text: 'Kelishiladi', data: 'SALARY|negotiable' },
-// 						{ text: '⏭ Oʻtkazib yuborish', data: 'SALARY|SKIP' }
-// 					],
-// 					{ columns: 2 }
-// 				)
-
-// 				console.log('Salary choice raw:', salaryChoice)
-
-// 				let salary: string | null = null
-
-// 				if (salaryChoice) {
-// 					const trimmedChoice = salaryChoice.trim()
-// 					if (trimmedChoice.startsWith('SALARY|')) {
-// 						const salaryValue = trimmedChoice.replace('SALARY|', '')
-// 						if (salaryValue === 'SKIP') {
-// 							salary = null
-// 						} else if (salaryValue === 'negotiable') {
-// 							salary = 'Kelishiladi'
-// 						} else {
-// 							salary = salaryValue.replace(/_/g, ' ') + ' soʻm'
-// 						}
-// 					}
-// 				}
-
-// 				// Vakansiyani yaratish
-// 				const vacancy = await prisma.vacancy.create({
-// 					data: {
-// 						title,
-// 						description,
-// 						salary: salary,
-// 						isActive: true
-// 					}
-// 				})
-
-// 				await ctx.reply(
-// 					salary
-// 						? `✅ Vakansiya yaratildi! (Maosh: ${salary})`
-// 						: `✅ Vakansiya yaratildi! Maosh kiritilmadi`
-// 				)
-
-// 				// ========== MUHIM: ESKI CALLBACKLARNI TOZALASH ==========
-// 				console.log('🧹 Eski callbacklarni tozalash...')
-// 				let cleanedCount = 0
-// 				const maxCleanup = 5
-
-// 				while (cleanedCount < maxCleanup) {
-// 					try {
-// 						const oldUpd = await Promise.race([
-// 							conversation.wait(),
-// 							new Promise(resolve => setTimeout(resolve, 200))
-// 						])
-
-// 						if (oldUpd && 'callbackQuery' in oldUpd && oldUpd.callbackQuery) {
-// 							await oldUpd.answerCallbackQuery().catch(() => {})
-// 							console.log(
-// 								`🧹 ${cleanedCount + 1}-eski callback tozalandi:`,
-// 								oldUpd.callbackQuery.data
-// 							)
-// 							cleanedCount++
-// 						} else {
-// 							break
-// 						}
-// 					} catch (e) {
-// 						console.log('Eski callbacklar yoʻq yoki vaqt tugadi')
-// 						break
-// 					}
-// 				}
-// 				console.log(`🧹 Jami tozalangan: ${cleanedCount} ta eski callback`)
-// 				await conversation.sleep(500)
-
-// 				// ========== RASM YUKLASH (SAVOLLARDAN OLDIN) ==========
-// 				console.log('📸 Vakansiya rasmi soʻralmoqda...')
-// 				const photoUrl = await uploadVacancyPhoto(conversation, ctx, vacancy.id, false)
-
-// 				if (photoUrl) {
-// 					console.log('✅ Vakansiya rasmi yuklandi va saqlandi:', photoUrl)
-// 				} else {
-// 					console.log('⏭ Vakansiya rasmi yuklanmadi (ixtiyoriy)')
-// 				}
-
-// 				// ========== YANA ESKI CALLBACKLARNI TOZALASH ==========
-// 				console.log('🧹 uploadVacancyPhoto dan keyin eski callbacklarni tozalash...')
-// 				cleanedCount = 0
-// 				while (cleanedCount < maxCleanup) {
-// 					try {
-// 						const oldUpd = await Promise.race([
-// 							conversation.wait(),
-// 							new Promise(resolve => setTimeout(resolve, 200))
-// 						])
-
-// 						if (oldUpd && 'callbackQuery' in oldUpd && oldUpd.callbackQuery) {
-// 							await oldUpd.answerCallbackQuery().catch(() => {})
-// 							console.log(
-// 								`🧹 ${cleanedCount + 1}-eski callback tozalandi:`,
-// 								oldUpd.callbackQuery.data
-// 							)
-// 							cleanedCount++
-// 						} else {
-// 							break
-// 						}
-// 					} catch (e) {
-// 						break
-// 					}
-// 				}
-// 				console.log(`🧹 Jami tozalangan: ${cleanedCount} ta eski callback`)
-// 				await conversation.sleep(300)
-
-// 				// Savol qo'shishni so'rash
-// 				const addQuestion = await askChoice(conversation, ctx, '❓ *Savol qoʻshasizmi?*', [
-// 					{ text: '✅ Ha', data: 'YES' },
-// 					{ text: '⏭ Oʻtkazib yuborish', data: 'NO' }
-// 				])
-
-// 				console.log('Savol qoʻshish natijasi:', addQuestion)
-
-// 				if (addQuestion && addQuestion.trim() === 'YES') {
-// 					await ctx.reply('Endi savollar qoʻshamiz.')
-
-// 					let addMore = true
-// 					while (addMore) {
-// 						await addVacancyQuestion(conversation, ctx, vacancy.id)
-// 						await conversation.sleep(500)
-
-// 						const more = await askChoice(conversation, ctx, 'Yana savol qoʻshasizmi?', [
-// 							{ text: '➕ Yana savol', data: 'YES' },
-// 							{ text: '✅ Yetarli', data: 'NO' }
-// 						])
-
-// 						addMore = more !== null && more.trim() === 'YES'
-// 					}
-
-// 					await ctx.reply('✅ Vakansiya va savollar muvaffaqiyatli qoʻshildi!')
-// 				} else if (addQuestion && addQuestion.trim() === 'NO') {
-// 					await ctx.reply('✅ Vakansiya muvaffaqiyatli qoʻshildi! (Savollar qoʻshilmadi)')
-// 				} else {
-// 					await ctx.reply('⚠️ Savol qoʻshish bekor qilindi.')
-// 				}
-// 				continue
-// 			}
-
-// 			if (action === 'A|COURSE_ADD') {
-// 				// Step 1: Kurs nomi
-// 				const title = await askText(conversation, ctx, '🎓 *Step 1: Kurs nomini kiriting:*')
-// 				if (!title) continue
-
-// 				// Step 2: Kurs tavsifi (OPTIONAL)
-// 				const description = await askText(
-// 					conversation,
-// 					ctx,
-// 					'📝 *Step 2: Kurs tavsifini kiriting:*\n\nAgar tavsif kiritmasangiz, ➖ belgisini yuboring.'
-// 				)
-
-// 				// Step 3: Kurs narxi (OPTIONAL)
-// 				const priceChoice = await askChoice(
-// 					conversation,
-// 					ctx,
-// 					'💰 *Step 3: Kurs narxini tanlang yoki oʻtkazib yuboring*',
-// 					[
-// 						{ text: '500 000 soʻm', data: 'PRICE|500000' },
-// 						{ text: '1 000 000 soʻm', data: 'PRICE|1000000' },
-// 						{ text: '1 500 000 soʻm', data: 'PRICE|1500000' },
-// 						{ text: '2 000 000 soʻm', data: 'PRICE|2000000' },
-// 						{ text: 'Bepul', data: 'PRICE|FREE' },
-// 						{ text: 'Boshqa narx', data: 'PRICE|CUSTOM' },
-// 						{ text: '⏭ Oʻtkazib yuborish', data: 'PRICE|SKIP' }
-// 					],
-// 					{ columns: 2 }
-// 				)
-
-// 				let price: string | null = null
-
-// 				if (priceChoice && priceChoice.startsWith('PRICE|')) {
-// 					const priceValue = priceChoice.replace('PRICE|', '')
-
-// 					if (priceValue === 'SKIP') {
-// 						price = null
-// 					} else if (priceValue === 'FREE') {
-// 						price = 'Bepul'
-// 					} else if (priceValue === 'CUSTOM') {
-// 						const customPrice = await askText(
-// 							conversation,
-// 							ctx,
-// 							'💰 *Narxni kiriting:*\n\nMasalan: 750000 yoki 1.2 mln'
-// 						)
-// 						const cleanPrice = customPrice.replace(/[^0-9]/g, '')
-// 						price = cleanPrice ? `${parseInt(cleanPrice).toLocaleString()} soʻm` : null
-// 					} else {
-// 						price = `${parseInt(priceValue).toLocaleString()} soʻm`
-// 					}
-// 				}
-
-// 				// Kursni yaratish
-// 				const course = await prisma.course.create({
-// 					data: {
-// 						title,
-// 						description: description === '➖' ? null : description,
-// 						price,
-// 						isActive: true
-// 					}
-// 				})
-
-// 				await ctx.reply(
-// 					price
-// 						? `✅ Kurs muvaffaqiyatli qoʻshildi! (Narx: ${price})`
-// 						: '✅ Kurs muvaffaqiyatli qoʻshildi! (Narx kiritilmadi)'
-// 				)
-
-// 				// ========== MUHIM: ESKI CALLBACKLARNI TOZALASH ==========
-// 				console.log('🧹 Kurs uchun eski callbacklarni tozalash...')
-
-// 				let cleanedCount = 0
-// 				const maxCleanup = 5
-
-// 				while (cleanedCount < maxCleanup) {
-// 					try {
-// 						const oldUpd = await Promise.race([
-// 							conversation.wait(),
-// 							new Promise(resolve => setTimeout(resolve, 200))
-// 						])
-
-// 						if (oldUpd && 'callbackQuery' in oldUpd && oldUpd.callbackQuery) {
-// 							await oldUpd.answerCallbackQuery().catch(() => {})
-// 							console.log(
-// 								`🧹 ${cleanedCount + 1}-eski callback tozalandi:`,
-// 								oldUpd.callbackQuery.data
-// 							)
-// 							cleanedCount++
-// 						} else {
-// 							break
-// 						}
-// 					} catch (e) {
-// 						console.log('Eski callbacklar yoʻq yoki vaqt tugadi')
-// 						break
-// 					}
-// 				}
-
-// 				console.log(`🧹 Jami tozalangan: ${cleanedCount} ta eski callback`)
-// 				await conversation.sleep(500)
-// 				// ========== TOZALASH TUGADI ==========
-
-// 				// ========== KURS RASMI YUKLASH (ixtiyoriy) ==========
-// 				console.log('📸 Kurs rasmi soʻralmoqda...')
-// 				const photoUrl = await uploadCoursePhoto(conversation, ctx, course.id, false)
-// 				if (photoUrl) {
-// 					console.log('✅ Kurs rasmi yuklandi:', photoUrl)
-// 				}
-// 				// ========== KURS RASMI YUKLASH TUGADI ==========
-
-// 				continue
-// 			}
-// 		}
-//   } catch (err) {
-//     if (isNavSignal(err)) {
-//       if (err.message === 'START') {
-//         await showStartMenu(ctx)
-//         return
-//       }
-//       if (err.message === 'ADMIN') {
-//         await replaceBotMessage(ctx, '👨‍💼 Siz allaqachon admin panelsiz.')
-//         return
-//       }
-//     }
-
-//     logger.error({ err }, 'Admin flow failed')
-//     await replaceBotMessage(ctx, '❌ Xatolik yuz berdi. Iltimos qaytadan urinib ko‘ring.')
-//   }
-// }
 
 export async function adminFlow(
 	conversation: Conversation<BotContext>,
@@ -2589,12 +1705,6 @@ export async function adminFlow(
 		ctx.session.flowState = { step: 'idle' }
 	}
 }
-
-/* admin applications browser moved to admin-applications.browser.ts */
-
-/* =========================
-   MAIN MENU
-========================= */
 
 async function showAdminMainMenu(
 	conversation: Conversation<BotContext>,
@@ -2733,10 +1843,6 @@ Matn, rasm yoki fayl yuborishingiz mumkin. Bekor qilish uchun /cancel ni bosing.
 	}
 }
 
-/* =========================
-   VACANCY FLOW
-========================= */
-
 async function handleVacancyTitle(
 	conversation: Conversation<BotContext>,
 	ctx: BotContext
@@ -2804,46 +1910,6 @@ async function handleVacancyDescriptionInput(
 	}
 }
 
-// async function handleVacancyDuplicateCheck(
-// 	conversation: Conversation<BotContext>,
-// 	ctx: BotContext
-// ): Promise<void> {
-// 	const state = ctx.session.flowState
-// 	const title: string = state.data.title
-
-// 	const existingVacancy = await prisma.vacancy.findFirst({
-// 		where: {
-// 			title: {
-// 				equals: title,
-// 				mode: 'insensitive'
-// 			}
-// 		}
-// 	})
-
-// 	if (existingVacancy) {
-// 		const confirm = await askChoice(
-// 			conversation,
-// 			ctx,
-// 			`⚠️ *${title}* nomli vakansiya allaqachon mavjud!\n\nDavom etilsa, takroriy vakansiya yaratiladi.\n\nDavom etasizmi?`,
-// 			[
-// 				{ text: '✅ Ha, davom et', data: 'CONTINUE' },
-// 				{ text: '❌ Yoʻq, bekor qil', data: 'CANCEL' }
-// 			]
-// 		)
-
-// 		if (confirm !== 'CONTINUE') {
-// 			await ctx.reply('❌ Vakansiya qoʻshish bekor qilindi.')
-// 			ctx.session.flowState = { step: 'idle' }
-// 			return
-// 		}
-// 	}
-
-// 	ctx.session.flowState = {
-// 		step: 'vacancy_salary',
-// 		data: { ...state.data }
-// 	}
-// }
-
 async function handleVacancyDuplicateCheck(
 	conversation: Conversation<BotContext>,
 	ctx: BotContext
@@ -2851,7 +1917,6 @@ async function handleVacancyDuplicateCheck(
 	const state = ctx.session.flowState
 	const title: string = state.data.title
 
-	// MUHIM: DB so'rovini conversation.external() ichida bajaring
 	const existingVacancy = await conversation.external(() =>
 		prisma.vacancy.findFirst({
 			where: {
@@ -2886,68 +1951,6 @@ async function handleVacancyDuplicateCheck(
 		data: { ...state.data }
 	}
 }
-
-// async function handleVacancySalary(
-// 	conversation: Conversation<BotContext>,
-// 	ctx: BotContext
-// ): Promise<void> {
-// 	const state = ctx.session.flowState
-
-// 	const salaryChoice = await askChoice(
-// 		conversation,
-// 		ctx,
-// 		'💰 *Step 2: Maoshni tanlang yoki oʻtkazib yuboring*',
-// 		[
-// 			{ text: '1 000 000 soʻm', data: 'SALARY|1_000_000' },
-// 			{ text: '2 000 000 soʻm', data: 'SALARY|2_000_000' },
-// 			{ text: '4 000 000 soʻm', data: 'SALARY|4_000_000' },
-// 			{ text: 'Kelishiladi', data: 'SALARY|negotiable' },
-// 			{ text: '⏭ Oʻtkazib yuborish', data: 'SALARY|SKIP' }
-// 		],
-// 		{ columns: 2 }
-// 	)
-
-// 	let salary: string | null = null
-
-// 	if (salaryChoice) {
-// 		const trimmedChoice = salaryChoice.trim()
-// 		if (trimmedChoice.startsWith('SALARY|')) {
-// 			const salaryValue = trimmedChoice.replace('SALARY|', '')
-
-// 			if (salaryValue === 'SKIP') {
-// 				salary = null
-// 			} else if (salaryValue === 'negotiable') {
-// 				salary = 'Kelishiladi'
-// 			} else {
-// 				salary = salaryValue.replace(/_/g, ' ') + ' soʻm'
-// 			}
-// 		}
-// 	}
-
-// 	const vacancy = await prisma.vacancy.create({
-// 		data: {
-// 			title: state.data.title,
-// 			description: state.data.description ?? null,
-// 			salary,
-// 			isActive: true
-// 		}
-// 	})
-
-// 	await ctx.reply(
-// 		salary
-// 			? `✅ Vakansiya yaratildi! (Maosh: ${salary})`
-// 			: '✅ Vakansiya yaratildi! Maosh kiritilmadi'
-// 	)
-
-// 	await cleanupOldCallbacks(conversation)
-
-// 	ctx.session.flowState = {
-// 		step: 'vacancy_photo',
-// 		data: {
-// 			vacancyId: vacancy.id
-// 		}
-// 	}
-// }
 
 async function handleVacancySalary(
 	conversation: Conversation<BotContext>,
@@ -2985,7 +1988,6 @@ async function handleVacancySalary(
 		}
 	}
 
-	// MUHIM: DB write ham external() ichida
 	const vacancy = await conversation.external(() =>
 		prisma.vacancy.create({
 			data: {
@@ -3008,29 +2010,6 @@ async function handleVacancySalary(
 		data: { vacancyId: vacancy.id }
 	}
 }
-
-// async function handleVacancyPhoto(
-// 	conversation: Conversation<BotContext>,
-// 	ctx: BotContext
-// ): Promise<void> {
-// 	const state = ctx.session.flowState
-
-// 	console.log('📸 Vakansiya rasmi soʻralmoqda...')
-// 	const photoUrl = await uploadVacancyPhoto(conversation, ctx, state.data.vacancyId, false)
-
-// 	if (photoUrl) {
-// 		console.log('✅ Vakansiya rasmi yuklandi va saqlandi:', photoUrl)
-// 	} else {
-// 		console.log('⏭ Vakansiya rasmi yuklanmadi (ixtiyoriy)')
-// 	}
-
-// 	await cleanupOldCallbacks(conversation)
-
-// 	ctx.session.flowState = {
-// 		step: 'vacancy_question_decision',
-// 		data: { vacancyId: state.data.vacancyId }
-// 	}
-// }
 
 async function handleVacancyPhoto(
 	conversation: Conversation<BotContext>,
@@ -3073,7 +2052,6 @@ async function handleVacancyPhoto(
 				return
 			}
 
-			// Eskirgan callbacklar — ignore
 			continue
 		}
 
@@ -3193,10 +2171,6 @@ async function handleVacancyQuestionMore(
 	await ctx.reply('✅ Vakansiya va savollar muvaffaqiyatli qoʻshildi!')
 	ctx.session.flowState = { step: 'idle' }
 }
-
-/* =========================
-   COURSE FLOW
-========================= */
 
 async function handleCourseTitle(
 	conversation: Conversation<BotContext>,
@@ -3352,6 +2326,7 @@ async function handleCourseCreate(
 		data: { courseId: course.id }
 	}
 }
+
 async function handleCoursePhoto(
 	conversation: Conversation<BotContext>,
 	ctx: BotContext
@@ -3379,7 +2354,6 @@ async function handleCoursePhoto(
 	while (true) {
 		const upd = await conversation.wait()
 
-		// CALLBACK QUERY HANDLER
 		if (upd.callbackQuery) {
 			const data = upd.callbackQuery.data
 			await upd.answerCallbackQuery().catch(() => {})
@@ -3392,17 +2366,14 @@ async function handleCoursePhoto(
 				return
 			}
 
-			// Boshqa callbacklarni ignore qilish
 			continue
 		}
 
-		// PHOTO HANDLER
 		if (upd.message?.photo?.length) {
 			const best = upd.message.photo[upd.message.photo.length - 1]
 			const loadingMsg = await ctx.reply('⏳ Rasm yuklanmoqda...')
 
 			try {
-				// Telegram dan file olish
 				const file = await ctx.api.getFile(best.file_id)
 				if (!file.file_path) {
 					await ctx.api.deleteMessage(ctx.chat!.id, loadingMsg.message_id).catch(() => {})
@@ -3410,19 +2381,15 @@ async function handleCoursePhoto(
 					continue
 				}
 
-				// File ni yuklab olish
 				const axios = (await import('axios')).default
 				const url = `https://api.telegram.org/file/bot${process.env.BOT_TOKEN}/${file.file_path}`
 				const res = await axios.get(url, { responseType: 'arraybuffer' })
 				const buffer = Buffer.from(res.data)
 
-				// Cloudinary ga yuklash
 				const uploaded = await photoService.uploadBufferToCloudinary(buffer)
 
-				// Yuklanayotgan xabarni o'chirish
 				await ctx.api.deleteMessage(ctx.chat!.id, loadingMsg.message_id).catch(() => {})
 
-				// Database ga saqlash
 				await conversation.external(() =>
 					prisma.course.update({
 						where: { id: courseId },
@@ -3432,7 +2399,6 @@ async function handleCoursePhoto(
 
 				await ctx.reply('✅ Kurs rasmi muvaffaqiyatli yuklandi!')
 
-				// Flow ni tugatish
 				ctx.session.flowState = { step: 'idle' }
 				return
 			} catch (error) {
@@ -3443,7 +2409,6 @@ async function handleCoursePhoto(
 			}
 		}
 
-		// TEXT HANDLER
 		if (upd.message?.text) {
 			const text = upd.message.text.trim()
 			if (text === '/cancel') throw navError('CANCEL')
@@ -3452,10 +2417,6 @@ async function handleCoursePhoto(
 		}
 	}
 }
-
-/* =========================
-   HELPERS
-========================= */
 
 async function cleanupOldCallbacks(conversation: Conversation<BotContext>): Promise<void> {
 	console.log('🧹 cleanupOldCallbacks: pass-through mode')

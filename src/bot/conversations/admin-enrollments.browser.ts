@@ -136,7 +136,7 @@ async function manageEnrollmentsForCourse(
     const answers = (enrollment.answers || {}) as { days?: string; timeSlot?: string }
     const detail = [
       `📝 *${escapeMarkdown(enrollment.course?.title || '—')}*`,
-      `👤 *F\.I\.Sh:* ${escapeMarkdown(enrollment.fullName || userDisplayName(enrollment.user))}`,
+      `👤 *F.I.Sh:* ${escapeMarkdown(enrollment.fullName || userDisplayName(enrollment.user))}`,
       `📞 *Telefon:* ${escapeMarkdown(enrollment.phone || '—')}`,
       `📍 *Holat:* ${escapeMarkdown(enrollmentStatusText(ctx, enrollment.status))}`,
       `📅 *Kunlar:* ${escapeMarkdown(formatDays(answers.days))}`,
@@ -155,12 +155,13 @@ async function manageEnrollmentsForCourse(
     detailKb.row().text(t(ctx, '⬅️ Orqaga', '⬅️ Назад'), 'ENRD|BACK')
 
     const detailPromptMsg = await replaceBotMessage(ctx, detail, { parse_mode: 'Markdown', reply_markup: detailKb })
+    
     while (true) {
       const upd2 = await conversation.wait()
       const data2 = upd2.callbackQuery?.data
       if (!data2) continue
-      const fromMessageId = upd2.callbackQuery?.message?.message_id
-      if (fromMessageId && fromMessageId !== detailPromptMsg.message_id) {
+      const fromMessageId2 = upd2.callbackQuery?.message?.message_id
+      if (fromMessageId2 && fromMessageId2 !== detailPromptMsg.message_id) {
         await upd2.answerCallbackQuery({
           text: t(ctx, 'Bu tugmalar eskirgan.', 'Эти кнопки устарели.'),
           show_alert: false
@@ -168,12 +169,33 @@ async function manageEnrollmentsForCourse(
         continue
       }
       await upd2.answerCallbackQuery().catch(() => {})
+      
       if (data2 === 'ENRD|BACK') break
-      if (data2.startsWith('CE|')) return
+      
+      if (data2.startsWith('CE|APPROVE|')) {
+        const enrollmentId2 = data2.split('|')[2]
+        await prisma.courseEnrollment.update({
+          where: { id: enrollmentId2 },
+          data: { status: 'APPROVED' }
+        })
+        await ctx.reply(t(ctx, '✅ Ariza qabul qilindi!', '✅ Заявка принята!'))
+        await conversation.sleep(500)
+        break
+      }
+      
+      if (data2.startsWith('CE|REJECT|')) {
+        const enrollmentId2 = data2.split('|')[2]
+        await prisma.courseEnrollment.update({
+          where: { id: enrollmentId2 },
+          data: { status: 'REJECTED' }
+        })
+        await ctx.reply(t(ctx, '❌ Ariza rad etildi!', '❌ Заявка отклонена!'))
+        await conversation.sleep(500)
+        break
+      }
     }
   }
 }
-
 
 function userDisplayName(user: { firstName?: string | null; lastName?: string | null; username?: string | null } | null | undefined): string {
   const full = [user?.firstName, user?.lastName].filter(Boolean).join(' ').trim()
