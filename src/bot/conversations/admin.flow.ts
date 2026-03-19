@@ -358,10 +358,12 @@ async function uploadCoursePhoto(
           console.log(`✅ Kurs rasmi yuklandi: ${uploaded.secureUrl}`)
 
           // ========== MUHIM: Rasmni DATABASE'ga saqlash ==========
-          await prisma.course.update({
-            where: { id: courseId },
-            data: { imageUrl: uploaded.secureUrl }
-          })
+          await conversation.external(() =>
+            prisma.course.update({
+              where: { id: courseId },
+              data: { imageUrl: uploaded.secureUrl }
+            })
+          )
           console.log(`✅ Kurs rasmi database'ga saqlandi: ${courseId}`)
           // ======================================================
 
@@ -442,10 +444,12 @@ async function deleteCoursePhoto(
   )
 
   if (confirm === 'YES') {
-    await prisma.course.update({
-      where: { id: courseId },
-      data: { imageUrl: null }
-    })
+    await conversation.external(() =>
+      prisma.course.update({
+        where: { id: courseId },
+        data: { imageUrl: null }
+      })
+    )
     await ctx.reply('✅ Kurs rasmi oʻchirildi!')
     return true
   }
@@ -1366,33 +1370,6 @@ async function manageCourses(
     const kb = new InlineKeyboard()
 
     courses.forEach(course => {
-      // MUHIM: Kurs nomini escape qilish
-      const escapedTitle = escapeMarkdown(course.title)
-      
-      // text += `• ${course.isActive ? '✅' : '⛔️'} *${escapedTitle}*\n`
-      
-      // // MUHIM: Narxni to'g'ri formatlash - "so'm" ikki marta yozilmasligi uchun
-      // let priceText = 'Kiritilmagan'
-      // if (course.price) {
-      //   if (course.price === 'Bepul') {
-      //     priceText = course.price
-      //   } else if (course.price.includes('soʻm') || course.price.includes("so'm")) {
-      //     priceText = course.price
-      //   } else {
-      //     priceText = `${course.price} soʻm`
-      //   }
-      // }
-      
-      // text += `  💰 Narxi: ${priceText}\n`
-      
-      // MUHIM: Tavsifni escape qilish
-      if (course.description) {
-        const escapedDesc = escapeMarkdown(course.description)
-        // Tavsifni qisqartirish
-        const shortDesc = escapedDesc.length > 50 
-          ? escapedDesc.substring(0, 47) + '...' 
-          : escapedDesc
-      }
       text += '\n'
       kb.text(course.title, `COURSE|VIEW|${course.id}`).row()
     })
@@ -1401,11 +1378,21 @@ async function manageCourses(
     if (page < totalPages - 1) kb.text('➡️ Keyingi', 'COURSE|PAGE|NEXT')
     kb.row().text('🏠 Bosh menyu', 'NAV|BACK')
 
-    await replaceBotMessage(ctx, text, { parse_mode: 'Markdown', reply_markup: kb })
+    const promptMsg = await replaceBotMessage(ctx, text, { parse_mode: 'Markdown', reply_markup: kb })
 
     const upd = await conversation.wait()
     const data = upd.callbackQuery?.data
     if (!data) continue
+
+    const fromMessageId = upd.callbackQuery?.message?.message_id
+    if (fromMessageId && fromMessageId !== promptMsg.message_id) {
+      await upd.answerCallbackQuery({
+        text: getUserLang(ctx) === 'ru' ? 'Эти кнопки устарели.' : 'Bu tugmalar eskirgan.',
+        show_alert: false
+      }).catch(() => {})
+      continue
+    }
+
     await upd.answerCallbackQuery().catch(() => {})
 
     if (data === 'NAV|BACK') return
@@ -1571,160 +1558,170 @@ async function viewCourse(
   ctx: BotContext,
   courseId: string
 ): Promise<void> {
-  const course = await prisma.course.findUnique({
-    where: { id: courseId },
-    include: { questions: { include: { options: true } } }
-  })
-
-  if (!course) return
-
-  const hasPrice = course.price !== null && course.price !== ''
-  const hasImage = course.imageUrl !== null && course.imageUrl !== ''
-
-  let priceText = 'Kiritilmagan'
-  if (hasPrice && course.price) {
-    if (course.price === 'Bepul') {
-      priceText = course.price
-    } else if (course.price.includes('soʻm') || course.price.includes("so'm")) {
-      priceText = course.price
-    } else {
-      priceText = `${course.price} soʻm`
-    }
-  }
-
-  const escapedDescription = course.description
-    ? escapeMarkdown(course.description)
-    : null
-
-  const escapedTitle = escapeMarkdown(course.title)
-
-  let text = [
-    `🎓 *${escapedTitle}*`,
-    '',
-    escapedDescription
-      ? `📝 *Tavsif:*\n${escapedDescription}`
-      : '📝 *Tavsif:* Kiritilmagan',
-    '',
-    `💰 *Narxi:* ${priceText}`,
-    hasImage ? '🖼 *Rasm:* Bor' : '🖼 *Rasm:* Yoʻq',
-    `⚡️ *Holat:* ${course.isActive ? 'Faol' : 'Faol emas'}`,
-    '',
-    '*Quyidagilardan birini tanlang:*'
-  ].join('\n')
-
-  const kb = new InlineKeyboard()
-    .text('✏️ Nomi', `COURSE_EDIT|TITLE|${course.id}`)
-    .text('📝 Tavsif', `COURSE_EDIT|DESC|${course.id}`)
-    .row()
-
-  if (hasPrice) {
-    kb.text('💰 Narxni tahrirlash', `COURSE_EDIT|PRICE|${course.id}`)
-  } else {
-    kb.text('💰 Narx qoʻshish', `COURSE_EDIT|ADD_PRICE|${course.id}`)
-  }
-
-  // YANGI: Rasm tugmalari
-  if (hasImage) {
-    kb.text('🖼 Rasmni yangilash', `COURSE_EDIT|PHOTO|${course.id}`)
-    kb.text('🗑 Rasmni oʻchirish', `COURSE_EDIT|DELETE_PHOTO|${course.id}`)
-  } else {
-    kb.text('🖼 Rasm qoʻshish', `COURSE_EDIT|ADD_PHOTO|${course.id}`)
-  }
-  kb.row()
-
-  // kb.text('🔀 Faollik', `COURSE_EDIT|TOGGLE|${course.id}`)
-    .row()
-    .text('🗑 Oʻchirish', `COURSE_DELETE|${course.id}`)
-    .row()
-    .text('⬅️ Orqaga', 'COURSE_BACK')
-
-  await replaceBotMessage(ctx, text, { parse_mode: 'Markdown', reply_markup: kb })
-
-  const upd = await conversation.wait()
-  const data = upd.callbackQuery?.data
-  if (!data) return
-  await upd.answerCallbackQuery().catch(() => {})
-
-  if (data === 'COURSE_BACK') return
-
-  if (data.startsWith('COURSE_EDIT|TITLE|')) {
-    const newTitle = await askText(
-      conversation,
-      ctx,
-      `✏️ *Yangi nom* (hozirgi: ${escapeMarkdown(course.title)}):`
-    )
-    if (newTitle) {
-      await prisma.course.update({ where: { id: courseId }, data: { title: newTitle } })
-      await ctx.reply('✅ Nomi yangilandi!')
-    }
-    await viewCourse(conversation, ctx, courseId)
-    return
-  }
-
-  if (data.startsWith('COURSE_EDIT|DESC|')) {
-    const newDesc = await askText(
-      conversation,
-      ctx,
-      `📝 *Yangi tavsif* (hozirgi: ${
-        course.description ? escapeMarkdown(course.description) : 'kiritilmagan'
-      }):\n\nTavsif kiritmasangiz, boʻsh qoldirish uchun ➖ belgisini yuboring.`
-    )
-    if (newDesc) {
-      const description = newDesc === '➖' ? null : newDesc
-      await prisma.course.update({ where: { id: courseId }, data: { description } })
-      await ctx.reply(description ? '✅ Tavsif yangilandi!' : '✅ Tavsif oʻchirildi!')
-    }
-    await viewCourse(conversation, ctx, courseId)
-    return
-  }
-
-  if (data.startsWith('COURSE_EDIT|PRICE|') || data.startsWith('COURSE_EDIT|ADD_PRICE|')) {
-    await editCoursePrice(conversation, ctx, courseId, data.startsWith('COURSE_EDIT|PRICE|'))
-    await viewCourse(conversation, ctx, courseId)
-    return
-  }
-
-  // YANGI: Rasmni yangilash
-  if (data.startsWith('COURSE_EDIT|PHOTO|') || data.startsWith('COURSE_EDIT|ADD_PHOTO|')) {
-    const isEdit = data.startsWith('COURSE_EDIT|PHOTO|')
-    const photoUrl = await uploadCoursePhoto(conversation, ctx, courseId, isEdit)
-    if (photoUrl) {
-      await prisma.course.update({
+  while (true) {
+    const course = await conversation.external(() =>
+      prisma.course.findUnique({
         where: { id: courseId },
-        data: { imageUrl: photoUrl }
+        include: { questions: { include: { options: true } } }
       })
+    )
+
+    if (!course) {
+      await ctx.reply('⚠️ Kurs topilmadi yoki oʻchirib yuborilgan.')
+      return
     }
-    await viewCourse(conversation, ctx, courseId)
-    return
-  }
 
-  // YANGI: Rasmni o'chirish
-  if (data.startsWith('COURSE_EDIT|DELETE_PHOTO|')) {
-    await deleteCoursePhoto(conversation, ctx, courseId)
-    await viewCourse(conversation, ctx, courseId)
-    return
-  }
+    const hasPrice = course.price !== null && course.price !== ''
+    const hasImage = course.imageUrl !== null && course.imageUrl !== ''
 
-  if (data.startsWith('COURSE_EDIT|TOGGLE|')) {
-    await prisma.course.update({
-      where: { id: courseId },
-      data: { isActive: !course.isActive }
-    })
-    await ctx.reply(`✅ Kurs ${!course.isActive ? 'faollashtirildi' : 'faolsizlashtirildi'}`)
-    await viewCourse(conversation, ctx, courseId)
-    return
-  }
-
-  if (data.startsWith('COURSE_DELETE|')) {
-    const confirm = await askChoice(conversation, ctx, '⚠️ *Rostdan ham oʻchirilsinmi?*', [
-      { text: '✅ Ha', data: 'YES' },
-      { text: '❌ Yoʻq', data: 'NO' }
-    ])
-    if (confirm === 'YES') {
-      await prisma.course.delete({ where: { id: courseId } })
-      await ctx.reply('✅ Kurs oʻchirildi')
+    let priceText = 'Kiritilmagan'
+    if (hasPrice && course.price) {
+      if (course.price === 'Bepul') {
+        priceText = course.price
+      } else if (course.price.includes('soʻm') || course.price.includes("so'm")) {
+        priceText = course.price
+      } else {
+        priceText = `${course.price} soʻm`
+      }
     }
-    return
+
+    const escapedDescription = course.description
+      ? escapeMarkdown(course.description)
+      : null
+
+    const escapedTitle = escapeMarkdown(course.title)
+
+    const text = [
+      `🎓 *${escapedTitle}*`,
+      '',
+      escapedDescription
+        ? `📝 *Tavsif:*\n${escapedDescription}`
+        : '📝 *Tavsif:* Kiritilmagan',
+      '',
+      `💰 *Narxi:* ${priceText}`,
+      hasImage ? '🖼 *Rasm:* Bor' : '🖼 *Rasm:* Yoʻq',
+      `⚡️ *Holat:* ${course.isActive ? 'Faol' : 'Faol emas'}`,
+      '',
+      '*Quyidagilardan birini tanlang:*'
+    ].join('\n')
+
+    const kb = new InlineKeyboard()
+      .text('✏️ Nomi', `COURSE_EDIT|TITLE|${course.id}`)
+      .text('📝 Tavsif', `COURSE_EDIT|DESC|${course.id}`)
+      .row()
+
+    if (hasPrice) {
+      kb.text('💰 Narxni tahrirlash', `COURSE_EDIT|PRICE|${course.id}`)
+    } else {
+      kb.text('💰 Narx qoʻshish', `COURSE_EDIT|ADD_PRICE|${course.id}`)
+    }
+
+    if (hasImage) {
+      kb.text('🖼 Rasmni yangilash', `COURSE_EDIT|PHOTO|${course.id}`)
+      kb.text('🗑 Rasmni oʻchirish', `COURSE_EDIT|DELETE_PHOTO|${course.id}`)
+    } else {
+      kb.text('🖼 Rasm qoʻshish', `COURSE_EDIT|ADD_PHOTO|${course.id}`)
+    }
+    kb.row()
+      .text('🗑 Oʻchirish', `COURSE_DELETE|${course.id}`)
+      .row()
+      .text('⬅️ Orqaga', 'COURSE_BACK')
+
+    const promptMsg = await replaceBotMessage(ctx, text, { parse_mode: 'Markdown', reply_markup: kb })
+
+    while (true) {
+      const upd = await conversation.wait()
+      const data = upd.callbackQuery?.data
+      if (!data) continue
+
+      const fromMessageId = upd.callbackQuery?.message?.message_id
+      if (fromMessageId && fromMessageId !== promptMsg.message_id) {
+        await upd.answerCallbackQuery({
+          text: getUserLang(ctx) === 'ru' ? 'Эти кнопки устарели.' : 'Bu tugmalar eskirgan.',
+          show_alert: false
+        }).catch(() => {})
+        continue
+      }
+
+      await upd.answerCallbackQuery().catch(() => {})
+
+      if (data === 'COURSE_BACK') return
+
+      if (data.startsWith('COURSE_EDIT|TITLE|')) {
+        const newTitle = await askText(
+          conversation,
+          ctx,
+          `✏️ *Yangi nom* (hozirgi: ${escapeMarkdown(course.title)}):`
+        )
+        if (newTitle) {
+          await conversation.external(() =>
+            prisma.course.update({ where: { id: courseId }, data: { title: newTitle } })
+          )
+          await ctx.reply('✅ Nomi yangilandi!')
+        }
+        break
+      }
+
+      if (data.startsWith('COURSE_EDIT|DESC|')) {
+        const newDesc = await askText(
+          conversation,
+          ctx,
+          `📝 *Yangi tavsif* (hozirgi: ${
+            course.description ? escapeMarkdown(course.description) : 'kiritilmagan'
+          }):\n\nTavsif kiritmasangiz, boʻsh qoldirish uchun ➖ belgisini yuboring.`
+        )
+        if (newDesc) {
+          const description = newDesc === '➖' ? null : newDesc
+          await conversation.external(() =>
+            prisma.course.update({ where: { id: courseId }, data: { description } })
+          )
+          await ctx.reply(description ? '✅ Tavsif yangilandi!' : '✅ Tavsif oʻchirildi!')
+        }
+        break
+      }
+
+      if (data.startsWith('COURSE_EDIT|PRICE|') || data.startsWith('COURSE_EDIT|ADD_PRICE|')) {
+        await editCoursePrice(conversation, ctx, courseId, data.startsWith('COURSE_EDIT|PRICE|'))
+        break
+      }
+
+      if (data.startsWith('COURSE_EDIT|PHOTO|') || data.startsWith('COURSE_EDIT|ADD_PHOTO|')) {
+        const isEdit = data.startsWith('COURSE_EDIT|PHOTO|')
+        await uploadCoursePhoto(conversation, ctx, courseId, isEdit)
+        break
+      }
+
+      if (data.startsWith('COURSE_EDIT|DELETE_PHOTO|')) {
+        await deleteCoursePhoto(conversation, ctx, courseId)
+        break
+      }
+
+      if (data.startsWith('COURSE_EDIT|TOGGLE|')) {
+        await conversation.external(() =>
+          prisma.course.update({
+            where: { id: courseId },
+            data: { isActive: !course.isActive }
+          })
+        )
+        await ctx.reply(`✅ Kurs ${!course.isActive ? 'faollashtirildi' : 'faolsizlashtirildi'}`)
+        break
+      }
+
+      if (data.startsWith('COURSE_DELETE|')) {
+        const confirm = await askChoice(conversation, ctx, '⚠️ *Rostdan ham oʻchirilsinmi?*', [
+          { text: '✅ Ha', data: 'YES' },
+          { text: '❌ Yoʻq', data: 'NO' }
+        ])
+        if (confirm === 'YES') {
+          await conversation.external(() =>
+            prisma.course.delete({ where: { id: courseId } })
+          )
+          await ctx.reply('✅ Kurs oʻchirildi')
+          return
+        }
+        break
+      }
+    }
   }
 }
 async function viewCourseEnrollments(
@@ -1763,7 +1760,9 @@ async function editCoursePrice(
   courseId: string,
   isEditing: boolean
 ): Promise<void> {
-  const course = await prisma.course.findUnique({ where: { id: courseId } })
+  const course = await conversation.external(() =>
+    prisma.course.findUnique({ where: { id: courseId } })
+  )
   if (!course) return
 
   const currentPrice = isEditing ? `(hozirgi: ${course.price || 'kiritilmagan'})` : ''
@@ -1792,7 +1791,9 @@ async function editCoursePrice(
 
   if (priceValue === 'SKIP') {
     if (isEditing) {
-      await prisma.course.update({ where: { id: courseId }, data: { price: null } })
+      await conversation.external(() =>
+        prisma.course.update({ where: { id: courseId }, data: { price: null } })
+      )
       await ctx.reply('✅ Narx oʻchirildi!')
     } else {
       await ctx.reply('⏭ Narx qoʻshilmadi.')
@@ -1815,10 +1816,12 @@ async function editCoursePrice(
   }
 
   if (newPrice) {
-    await prisma.course.update({
-      where: { id: courseId },
-      data: { price: newPrice }
-    })
+    await conversation.external(() =>
+      prisma.course.update({
+        where: { id: courseId },
+        data: { price: newPrice }
+      })
+    )
     await ctx.reply(isEditing ? '✅ Narx yangilandi!' : '✅ Narx qoʻshildi!')
   }
 }
@@ -3521,14 +3524,16 @@ async function handleCourseCreate(
 ): Promise<void> {
 	const state = ctx.session.flowState
 
-	const course = await prisma.course.create({
-		data: {
-			title: state.data.title,
-			description: state.data.description ?? null,
-			price: state.data.price ?? null,
-			isActive: true
-		}
-	})
+	const course = await conversation.external(() =>
+		prisma.course.create({
+			data: {
+				title: state.data.title,
+				description: state.data.description ?? null,
+				price: state.data.price ?? null,
+				isActive: true
+			}
+		})
+	)
 
 	await ctx.reply(
 		state.data.price
