@@ -358,10 +358,12 @@ async function uploadCoursePhoto(
           console.log(`✅ Kurs rasmi yuklandi: ${uploaded.secureUrl}`)
 
           // ========== MUHIM: Rasmni DATABASE'ga saqlash ==========
-          await prisma.course.update({
-            where: { id: courseId },
-            data: { imageUrl: uploaded.secureUrl }
-          })
+          await conversation.external(() =>
+            prisma.course.update({
+              where: { id: courseId },
+              data: { imageUrl: uploaded.secureUrl }
+            })
+          )
           console.log(`✅ Kurs rasmi database'ga saqlandi: ${courseId}`)
           // ======================================================
 
@@ -442,10 +444,12 @@ async function deleteCoursePhoto(
   )
 
   if (confirm === 'YES') {
-    await prisma.course.update({
-      where: { id: courseId },
-      data: { imageUrl: null }
-    })
+    await conversation.external(() =>
+      prisma.course.update({
+        where: { id: courseId },
+        data: { imageUrl: null }
+      })
+    )
     await ctx.reply('✅ Kurs rasmi oʻchirildi!')
     return true
   }
@@ -1571,10 +1575,12 @@ async function viewCourse(
   ctx: BotContext,
   courseId: string
 ): Promise<void> {
-  const course = await prisma.course.findUnique({
-    where: { id: courseId },
-    include: { questions: { include: { options: true } } }
-  })
+  const course = await conversation.external(() =>
+    prisma.course.findUnique({
+      where: { id: courseId },
+      include: { questions: { include: { options: true } } }
+    })
+  )
 
   if (!course) return
 
@@ -1654,7 +1660,9 @@ async function viewCourse(
       `✏️ *Yangi nom* (hozirgi: ${escapeMarkdown(course.title)}):`
     )
     if (newTitle) {
-      await prisma.course.update({ where: { id: courseId }, data: { title: newTitle } })
+      await conversation.external(() =>
+        prisma.course.update({ where: { id: courseId }, data: { title: newTitle } })
+      )
       await ctx.reply('✅ Nomi yangilandi!')
     }
     await viewCourse(conversation, ctx, courseId)
@@ -1671,7 +1679,9 @@ async function viewCourse(
     )
     if (newDesc) {
       const description = newDesc === '➖' ? null : newDesc
-      await prisma.course.update({ where: { id: courseId }, data: { description } })
+      await conversation.external(() =>
+        prisma.course.update({ where: { id: courseId }, data: { description } })
+      )
       await ctx.reply(description ? '✅ Tavsif yangilandi!' : '✅ Tavsif oʻchirildi!')
     }
     await viewCourse(conversation, ctx, courseId)
@@ -1687,13 +1697,7 @@ async function viewCourse(
   // YANGI: Rasmni yangilash
   if (data.startsWith('COURSE_EDIT|PHOTO|') || data.startsWith('COURSE_EDIT|ADD_PHOTO|')) {
     const isEdit = data.startsWith('COURSE_EDIT|PHOTO|')
-    const photoUrl = await uploadCoursePhoto(conversation, ctx, courseId, isEdit)
-    if (photoUrl) {
-      await prisma.course.update({
-        where: { id: courseId },
-        data: { imageUrl: photoUrl }
-      })
-    }
+    await uploadCoursePhoto(conversation, ctx, courseId, isEdit)
     await viewCourse(conversation, ctx, courseId)
     return
   }
@@ -1706,10 +1710,12 @@ async function viewCourse(
   }
 
   if (data.startsWith('COURSE_EDIT|TOGGLE|')) {
-    await prisma.course.update({
-      where: { id: courseId },
-      data: { isActive: !course.isActive }
-    })
+    await conversation.external(() =>
+      prisma.course.update({
+        where: { id: courseId },
+        data: { isActive: !course.isActive }
+      })
+    )
     await ctx.reply(`✅ Kurs ${!course.isActive ? 'faollashtirildi' : 'faolsizlashtirildi'}`)
     await viewCourse(conversation, ctx, courseId)
     return
@@ -1721,7 +1727,9 @@ async function viewCourse(
       { text: '❌ Yoʻq', data: 'NO' }
     ])
     if (confirm === 'YES') {
-      await prisma.course.delete({ where: { id: courseId } })
+      await conversation.external(() =>
+        prisma.course.delete({ where: { id: courseId } })
+      )
       await ctx.reply('✅ Kurs oʻchirildi')
     }
     return
@@ -1763,7 +1771,9 @@ async function editCoursePrice(
   courseId: string,
   isEditing: boolean
 ): Promise<void> {
-  const course = await prisma.course.findUnique({ where: { id: courseId } })
+  const course = await conversation.external(() =>
+    prisma.course.findUnique({ where: { id: courseId } })
+  )
   if (!course) return
 
   const currentPrice = isEditing ? `(hozirgi: ${course.price || 'kiritilmagan'})` : ''
@@ -1792,7 +1802,9 @@ async function editCoursePrice(
 
   if (priceValue === 'SKIP') {
     if (isEditing) {
-      await prisma.course.update({ where: { id: courseId }, data: { price: null } })
+      await conversation.external(() =>
+        prisma.course.update({ where: { id: courseId }, data: { price: null } })
+      )
       await ctx.reply('✅ Narx oʻchirildi!')
     } else {
       await ctx.reply('⏭ Narx qoʻshilmadi.')
@@ -1815,10 +1827,12 @@ async function editCoursePrice(
   }
 
   if (newPrice) {
-    await prisma.course.update({
-      where: { id: courseId },
-      data: { price: newPrice }
-    })
+    await conversation.external(() =>
+      prisma.course.update({
+        where: { id: courseId },
+        data: { price: newPrice }
+      })
+    )
     await ctx.reply(isEditing ? '✅ Narx yangilandi!' : '✅ Narx qoʻshildi!')
   }
 }
@@ -3521,14 +3535,16 @@ async function handleCourseCreate(
 ): Promise<void> {
 	const state = ctx.session.flowState
 
-	const course = await prisma.course.create({
-		data: {
-			title: state.data.title,
-			description: state.data.description ?? null,
-			price: state.data.price ?? null,
-			isActive: true
-		}
-	})
+	const course = await conversation.external(() =>
+		prisma.course.create({
+			data: {
+				title: state.data.title,
+				description: state.data.description ?? null,
+				price: state.data.price ?? null,
+				isActive: true
+			}
+		})
+	)
 
 	await ctx.reply(
 		state.data.price
