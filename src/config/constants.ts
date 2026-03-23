@@ -119,3 +119,98 @@ export const CallbackData = {
 	COURSE_PHOTO_RULES: 'COURSE_PHOTO|RULES',
 	COURSE_PHOTO_SKIP: 'COURSE_PHOTO|SKIP'
 } as const
+
+// ─── New module constants ────────────────────────────────────────────────────
+
+export const FLOW_TYPES = {
+	APPLICATION: 'application',
+	COURSE: 'course',
+} as const
+
+export const INPUT_TYPES = {
+	TEXT: 'text',
+	SELECT: 'select',
+	PHONE: 'phone',
+	PHOTO: 'photo',
+	FILE_OPTIONAL: 'file_optional',
+} as const
+
+export const COURSE_SCHEDULE_OPTIONS = {
+	days: [
+		{ value: 'MON_WED', uz: 'Dushanba / Chorshanba', ru: 'Понедельник / Среда' },
+		{ value: 'TUE_THU', uz: 'Seshanba / Payshanba', ru: 'Вторник / Четверг' },
+		{ value: 'SAT_SUN', uz: 'Shanba / Yakshanba', ru: 'Суббота / Воскресенье' },
+	],
+	time: [
+		{ value: '9_11', uz: '09:00 – 11:00', ru: '09:00 – 11:00' },
+		{ value: '14_16', uz: '14:00 – 16:00', ru: '14:00 – 16:00' },
+		{ value: '16_18', uz: '16:00 – 18:00', ru: '16:00 – 18:00' },
+	],
+} as const
+
+export const DEFAULT_APPLICATION_QUESTIONS = [
+	{
+		key: 'full_name',
+		uz: 'Ism va familiyangizni kiriting.',
+		ru: 'Введите имя и фамилию.',
+		input: INPUT_TYPES.TEXT,
+		options: [],
+	},
+	{
+		key: 'birth_date',
+		uz: 'Tug\'ilgan sanangizni kiriting (KK.OO.YYYY).',
+		ru: 'Введите дату рождения (ДД.ММ.ГГГГ).',
+		input: INPUT_TYPES.TEXT,
+		options: [],
+	},
+	{
+		key: 'address',
+		uz: 'Yashash manzilingizni kiriting.',
+		ru: 'Введите адрес проживания.',
+		input: INPUT_TYPES.TEXT,
+		options: [],
+	},
+	{
+		key: 'phone_number',
+		uz: 'Telefon raqamingizni yuboring.',
+		ru: 'Отправьте номер телефона.',
+		input: INPUT_TYPES.PHONE,
+		options: [],
+	},
+	{
+		key: 'family_status',
+		uz: 'Oilaviy holatingizni tanlang.',
+		ru: 'Выберите семейное положение.',
+		input: INPUT_TYPES.SELECT,
+		options: [
+			{ value: 'single', uz: 'Turmush qurmagan', ru: 'Не женат / не замужем' },
+			{ value: 'married', uz: 'Uylangan / turmush qurgan', ru: 'Женат / замужем' },
+			{ value: 'divorced', uz: 'Ajrashgan', ru: 'Разведён(а)' },
+		],
+	},
+	{
+		key: 'last_education',
+		uz: 'Oxirgi ta\'lim darajangizni tanlang.',
+		ru: 'Выберите последний уровень образования.',
+		input: INPUT_TYPES.SELECT,
+		options: [
+			{ value: 'school', uz: 'Maktab', ru: 'Школа' },
+			{ value: 'college', uz: 'Kollej / litsey', ru: 'Колледж / лицей' },
+			{ value: 'higher', uz: 'Oliy ta\'lim', ru: 'Высшее образование' },
+		],
+	},
+	{
+		key: 'work_experience',
+		uz: 'Oldin qayerda ishlagansiz?',
+		ru: 'Где вы работали ранее?',
+		input: INPUT_TYPES.TEXT,
+		options: [],
+	},
+	{
+		key: 'photo',
+		uz: 'Beldan tepaga tushgan aniq rasm yuboring.',
+		ru: 'Отправьте чёткое фото по пояс.',
+		input: INPUT_TYPES.PHOTO,
+		options: [],
+	},
+] as const

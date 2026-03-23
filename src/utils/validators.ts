@@ -103,3 +103,31 @@ static validateBirthDate(input: string): { isValid: boolean; date?: Date } {
 		return normalized
 	}
 }
+
+/**
+ * Normalize Uzbek phone number to E.164 format (+998XXXXXXXXX)
+ * Returns null if the number is invalid.
+ */
+export function normalizePhone(input: string): string | null {
+	if (!input) return null
+	// Strip all non-digit characters
+	const digits = input.replace(/\D/g, '')
+
+	// Already full with country code: 998XXXXXXXXX (12 digits)
+	if (digits.length === 12 && digits.startsWith('998')) {
+		return `+${digits}`
+	}
+	// With leading zero: 0XXXXXXXXX (10 digits)
+	if (digits.length === 10 && digits.startsWith('0')) {
+		return `+998${digits.slice(1)}`
+	}
+	// Local 9-digit number: XXXXXXXXX
+	if (digits.length === 9) {
+		return `+998${digits}`
+	}
+	// International format with + already in input
+	if (input.startsWith('+') && digits.length >= 11 && digits.length <= 13) {
+		return `+${digits}`
+	}
+	return null
+}
