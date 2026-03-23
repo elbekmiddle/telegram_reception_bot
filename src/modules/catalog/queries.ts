@@ -1,0 +1,10 @@
+import { DEFAULT_APPLICATION_QUESTIONS, INPUT_TYPES } from '../../config/constants'
+import type { Queryable } from '../../core/types'
+export type Vacancy = { id:string; title:string; description:string|null; salaryText:string|null; imageUrl:string|null }
+export type Course = { id:string; title:string; description:string|null; priceText:string|null; imageUrl:string|null }
+export type DynamicQuestion = { key:string; promptUz:string; promptRu:string; inputType:string; options:Array<{ value:string; labelUz:string; labelRu:string }> }
+export async function listActiveVacancies(db:Queryable): Promise<Vacancy[]> { const result = await db.query<Vacancy>(`SELECT id, title, description, salary_text AS "salaryText", image_url AS "imageUrl" FROM vacancies WHERE is_active=TRUE ORDER BY created_at DESC LIMIT 30`); return result.rows }
+export async function getVacancy(db:Queryable, id:string): Promise<Vacancy|null> { const result = await db.query<Vacancy>(`SELECT id, title, description, salary_text AS "salaryText", image_url AS "imageUrl" FROM vacancies WHERE id=$1 LIMIT 1`, [id]); return result.rows[0] ?? null }
+export async function listActiveCourses(db:Queryable): Promise<Course[]> { const result = await db.query<Course>(`SELECT id, title, description, price_text AS "priceText", image_url AS "imageUrl" FROM courses WHERE is_active=TRUE ORDER BY created_at DESC LIMIT 30`); return result.rows }
+export async function getCourse(db:Queryable, id:string): Promise<Course|null> { const result = await db.query<Course>(`SELECT id, title, description, price_text AS "priceText", image_url AS "imageUrl" FROM courses WHERE id=$1 LIMIT 1`, [id]); return result.rows[0] ?? null }
+export async function getVacancyQuestions(_db:Queryable, _vacancyId:string): Promise<DynamicQuestion[]> { return DEFAULT_APPLICATION_QUESTIONS.map(item => ({ key:item.key, promptUz:item.uz, promptRu:item.ru, inputType:item.input, options:item.input === INPUT_TYPES.SELECT ? item.options.map(option => ({ value:option.value, labelUz:option.uz, labelRu:option.ru })) : [] })) }
